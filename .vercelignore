@@ -1,0 +1,10 @@
+.git
+.next
+node_modules
+.env
+.env.*
+*.swp
+*.swo
+.DS_Store
+railroute-*.png
+docs
