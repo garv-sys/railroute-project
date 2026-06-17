@@ -22,18 +22,29 @@ export async function postJson<T>(url: string, body: unknown): Promise<T> {
   const inFlight = clientInFlightRequests.get(key);
   if (inFlight) return inFlight as Promise<T>;
 
-  const runFetch = () => fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(requestBody),
-  })
-    .then(async (response) => {
-      const data = await response.json();
-      if (!response.ok || data?.error) {
-        throw new Error(data?.error || "RailRoute request failed");
-      }
-      return data as T;
-    });
+  const runFetch = () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    return fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        clearTimeout(timeoutId);
+        const data = await response.json();
+        if (!response.ok || data?.error) {
+          throw new Error(data?.error || "RailRoute request failed");
+        }
+        return data as T;
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        throw error;
+      });
+  };
 
   const request = url === "/api/availability" && !priority
     ? clientAvailabilityQueue.add(runFetch)
