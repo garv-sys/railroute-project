@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       maxMultiCandidates: 0,
       maxMultiResults: 0,
       plannerLegTimeoutMs: 15000,
-      globalTimeoutMs: 10000,
+      globalTimeoutMs: 6500,
     } as const;
 
     const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);
