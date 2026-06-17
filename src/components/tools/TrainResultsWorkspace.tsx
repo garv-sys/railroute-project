@@ -560,22 +560,18 @@ export function TrainResultsWorkspace() {
     }
     setState({ loading: true, splitLoading: true, splitCoverage: "quick", error: "", trains: [], splits: [], multiSplits: [] });
     try {
+      let directTrainsList: any[] = [];
+      let splitRoutesList: any[] = [];
       let directCountForRequest = 0;
       let splitCountForRequest = 0;
+
       const directPromise = postJson<any>("/api/train-between", requestPayload)
         .then((direct) => {
           if (requestId !== searchRequestId.current) return [];
           const trains = direct.trains || [];
+          directTrainsList = trains;
           directCountForRequest = trains.length;
           setState((current) => ({ ...current, loading: false, trains, error: "" }));
-          queueLiveHydration(
-            trains,
-            { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
-            requestId,
-            hydrationId,
-            "direct train rows",
-            AUTO_LIVE_DIRECT_LIMIT
-          );
           return trains;
         })
         .catch((error) => {
@@ -593,6 +589,7 @@ export function TrainResultsWorkspace() {
         .then((split) => {
           const splitRoutes = split?.splitRoutes || split?.data?.splitRoutes || [];
           const multiSplitRoutes = split?.multiSplitRoutes || split?.data?.multiSplitRoutes || [];
+          splitRoutesList = splitRoutes;
           splitCountForRequest = splitRoutes.length + multiSplitRoutes.length;
           if (requestId !== searchRequestId.current) return;
           setState((current) => ({
@@ -602,22 +599,6 @@ export function TrainResultsWorkspace() {
             splits: splitRoutes,
             multiSplits: multiSplitRoutes,
           }));
-          const initialSplitRouteCount = Math.min(
-            splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination),
-            splitRoutes.length
-          );
-          splitAutoCheckedRouteCount.current = initialSplitRouteCount;
-          const prioritySplitRoutes = splitRoutes.slice(0, initialSplitRouteCount);
-          queueLiveHydration(
-            [
-              ...prioritySplitRoutes.flatMap((route: any) => [route.leg1, route.leg2]),
-            ],
-            { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
-            requestId,
-            hydrationId,
-            `first ${initialSplitRouteCount} split options`,
-            Number.POSITIVE_INFINITY
-          );
         })
         .catch(() => {
           if (requestId !== searchRequestId.current) return;
@@ -631,8 +612,43 @@ export function TrainResultsWorkspace() {
         });
 
       await Promise.allSettled([directPromise, splitPromise]);
-      if (requestId === searchRequestId.current && directCountForRequest === 0 && splitCountForRequest > 0) {
-        setResultMode("split");
+
+      if (requestId === searchRequestId.current) {
+        if (directCountForRequest === 0 && splitCountForRequest > 0) {
+          setResultMode("split");
+        }
+        
+        // Hydrate direct trains first
+        if (directTrainsList.length > 0) {
+          queueLiveHydration(
+            directTrainsList,
+            { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
+            requestId,
+            hydrationId,
+            "direct train rows",
+            AUTO_LIVE_DIRECT_LIMIT
+          );
+        }
+        
+        // Hydrate split routes next
+        if (splitRoutesList.length > 0) {
+          const initialSplitRouteCount = Math.min(
+            splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination),
+            splitRoutesList.length
+          );
+          splitAutoCheckedRouteCount.current = initialSplitRouteCount;
+          const prioritySplitRoutes = splitRoutesList.slice(0, initialSplitRouteCount);
+          queueLiveHydration(
+            [
+              ...prioritySplitRoutes.flatMap((route: any) => [route.leg1, route.leg2]),
+            ],
+            { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
+            requestId,
+            hydrationId,
+            `first ${initialSplitRouteCount} split options`,
+            Number.POSITIVE_INFINITY
+          );
+        }
       }
     } catch (error) {
       if (requestId !== searchRequestId.current) return;

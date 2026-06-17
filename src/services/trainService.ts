@@ -1117,6 +1117,15 @@ export function isHubOnPath(source: { lat: number; lon: number }, hub: { lat: nu
   return diff <= 90;
 }
 
+const USER_PRIORITY_HUBS = new Set([
+  'DDU', 'MGS',
+  'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE',
+  'PRYJ', 'ALD', 'PRRB', 'PCOI',
+  'LKO', 'LJN',
+  'CNB',
+  'BSB', 'BSBS'
+]);
+
 export function dynamicSplitHubCandidates(source: string, dest: string, preferredHub = '', limit = Number.POSITIVE_INFINITY) {
   const normalizedSource = normalizeStationCode(source);
   const normalizedDest = normalizeStationCode(dest);
@@ -1186,7 +1195,11 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     const coord = stationCoordinatesForRouting(code);
     if (!coord) return 999999;
     const hubObj = MAJOR_HUB_BY_CODE.get(code) || { code, lat: coord.lat, lon: coord.lon };
-    return dynamicHubScore(sourceCoord, destCoord, hubObj as MajorHub);
+    let score = dynamicHubScore(sourceCoord, destCoord, hubObj as MajorHub);
+    if (USER_PRIORITY_HUBS.has(code)) {
+      score -= 500;
+    }
+    return score;
   };
   
   filteredCandidates.sort((a, b) => getHubScore(a) - getHubScore(b));
@@ -2074,6 +2087,38 @@ export async function findSmartRoutes(source: string, dest: string, date: string
   const startSmartTime = Date.now();
   source = normalizeStationCode(source);
   dest = normalizeStationCode(dest);
+  const formattedDate = formatDateStr(date);
+
+  const cleanTrainNo = (num: any): string => {
+    if (!num) return '';
+    return String(num).trim().replace(/^0+/, '');
+  };
+
+  const directTrainNos = new Set<string>();
+  const directTrainNames = new Set<string>();
+
+  if (directTrains && directTrains.length > 0) {
+    directTrains.forEach((t) => {
+      const num = cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno);
+      if (num) directTrainNos.add(num);
+      const name = String(t.trainName || t.train_name || t.name || '').trim().toLowerCase();
+      if (name) directTrainNames.add(name);
+    });
+  } else {
+    try {
+      const rawDirect = await searchTrainsSmart(source, dest, formattedDate, { ...options, fetchLive: false });
+      rawDirect.forEach((t: any) => {
+        const num = cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno);
+        if (num) directTrainNos.add(num);
+        const name = String(t.trainName || t.train_name || t.name || '').trim().toLowerCase();
+        if (name) directTrainNames.add(name);
+      });
+      console.log(`[Smart Routing] Loaded ${directTrainNos.size} direct trains directly in backend for filtering.`);
+    } catch (e) {
+      console.warn("[Smart Routing] Failed to fetch direct trains in backend for filtering:", e);
+    }
+  }
+
   const preferredHub = normalizeStationCode(preferredHubInput);
   const hasPreferredHub = Boolean(preferredHub && preferredHub !== source && preferredHub !== dest);
   const splitHubLimit = quickLimit(options, options.maxSplitHubs, hasPreferredHub ? 35 : 30);
@@ -2187,9 +2232,17 @@ export async function findSmartRoutes(source: string, dest: string, date: string
             routeGrid:
             for (const t1 of takeForCoverage(l1Trains, splitLegLimit)) {
               for (const t2 of takeForCoverage(l2Trains, splitLegLimit)) {
-                const trainNo1 = t1.trainNo || t1.train_no;
-                const trainNo2 = t2.trainNo || t2.train_no;
-                if (trainNo1 && trainNo2 && trainNo1 === trainNo2) continue;
+                const trainNo1 = String(t1.trainNo || t1.train_no || t1.train_number || t1.trainno || '').trim();
+                const trainNo2 = String(t2.trainNo || t2.train_no || t2.train_number || t2.trainno || '').trim();
+                const cleanT1 = cleanTrainNo(trainNo1);
+                const cleanT2 = cleanTrainNo(trainNo2);
+                if (cleanT1 && cleanT2 && cleanT1 === cleanT2) continue;
+                if (directTrainNos.has(cleanT1) || directTrainNos.has(cleanT2)) continue;
+
+                const name1 = String(t1.trainName || t1.train_name || t1.name || '').trim().toLowerCase();
+                const name2 = String(t2.trainName || t2.train_name || t2.name || '').trim().toLowerCase();
+                if (name1 && name2 && name1 === name2) continue;
+                if (directTrainNames.has(name1) || directTrainNames.has(name2)) continue;
 
                 const arrTimeStr = t1.to_time || t1.to_sta || t1.arrivalTime;
                 const depTimeStr = t2.from_time || t2.from_std || t2.departureTime;
@@ -2308,7 +2361,8 @@ export async function findSmartRoutes(source: string, dest: string, date: string
       const timeoutLimit = options.globalTimeoutMs || 15000;
       const isRunningLowOnTime = elapsed > (timeoutLimit - 3000);
       if (elapsed > timeoutLimit) {
-        console.warn(`[smart-search] Verification exceeded global timeout (${elapsed}ms > ${timeoutLimit}ms). Verifying remaining candidates statically.`);
+        console.warn(`[smart-search] Verification exceeded global timeout (${elapsed}ms > ${timeoutLimit}ms). Returning ${validRoutes.length} routes found so far.`);
+        break;
       }
       
       const batchResults = await Promise.all(batch.map(async (route) => {
