@@ -431,6 +431,14 @@ function legSupportsRequestedClass(train: any, requestedClass: string): boolean 
   return false;
 }
 
+function safeParseFare(fareVal: any): number {
+  if (typeof fareVal === 'number') return fareVal;
+  if (!fareVal) return 0;
+  const str = String(fareVal).replace(/[^\d.]/g, '');
+  const parsed = parseFloat(str);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function trainServiceQualityBoost(train: any) {
   const text = String(`${train?.train_no || train?.trainNo || ''} ${train?.train_name || train?.trainName || ''}`).toUpperCase();
   if (/RAJDHANI/.test(text)) return 18;
@@ -1123,7 +1131,8 @@ const USER_PRIORITY_HUBS = new Set([
   'PRYJ', 'ALD', 'PRRB', 'PCOI', 'SFG',
   'LKO', 'LJN',
   'CNB',
-  'BSB', 'BSBS'
+  'BSB', 'BSBS',
+  'JP', 'KOTA', 'AII'
 ]);
 
 export function dynamicSplitHubCandidates(source: string, dest: string, preferredHub = '', limit = Number.POSITIVE_INFINITY) {
@@ -1853,7 +1862,7 @@ function generateMockTrainsLocal(fromStn: string, toStn: string, date: string): 
   }));
 }
 
-async function searchTrainsSmart(source: string, dest: string, date: string, options: TrainSearchOptions = {}) {
+export async function searchTrainsSmart(source: string, dest: string, date: string, options: TrainSearchOptions = {}) {
     let providerPairs = providerPairsForSearch(source, dest, options.exactStationOnly);
     if (typeof options.providerPairLimit === 'number' && Number.isFinite(options.providerPairLimit)) {
       providerPairs = providerPairs.slice(0, Math.max(1, options.providerPairLimit));
@@ -2122,7 +2131,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
   const preferredHub = normalizeStationCode(preferredHubInput);
   const hasPreferredHub = Boolean(preferredHub && preferredHub !== source && preferredHub !== dest);
   const splitHubLimit = quickLimit(options, options.maxSplitHubs, hasPreferredHub ? 35 : 30);
-  const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 12);
+  const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 40);
   const splitCandidateLimit = quickLimit(options, options.maxSplitCandidates, 250);
   const splitResultLimit = quickLimit(options, options.maxSplitResults, isFullCoverage(options) ? 120 : 15);
   const quickPotentialLimit = isFullCoverage(options)
@@ -2361,7 +2370,62 @@ export async function findSmartRoutes(source: string, dest: string, date: string
       const timeoutLimit = options.globalTimeoutMs || 15000;
       const isRunningLowOnTime = elapsed > (timeoutLimit - 3000);
       if (elapsed > timeoutLimit) {
-        console.warn(`[smart-search] Verification exceeded global timeout (${elapsed}ms > ${timeoutLimit}ms). Returning ${validRoutes.length} routes found so far.`);
+        console.warn(`[smart-search] Verification exceeded global timeout (${elapsed}ms > ${timeoutLimit}ms). Filling remaining ${splitResultLimit - validRoutes.length} slots statically.`);
+        const remainingCandidates = potentialRoutes.slice(idx);
+        const staticResults = await Promise.all(remainingCandidates.map(async (route) => {
+          try {
+            const leg1Date = route.leg1Date || formattedDate;
+            const leg2Date = route.leg2Date || formattedDate;
+            
+            const [leg1Enriched, leg2Enriched] = await Promise.all([
+              enrichWithLiveAvailability(
+                { ...route.t1, _journeyDate: leg1Date },
+                leg1Date,
+                classType,
+                { ...options, fetchLive: false }
+              ),
+              enrichWithLiveAvailability(
+                { ...route.t2, _journeyDate: leg2Date },
+                leg2Date,
+                classType,
+                { ...options, fetchLive: false }
+              )
+            ]);
+            
+            const f1 = safeParseFare(leg1Enriched.fare);
+            const f2 = safeParseFare(leg2Enriched.fare);
+            const totalFare = f1 > 0 && f2 > 0 ? f1 + f2 : 0;
+            
+            const res: SplitRouteResult = {
+              hubStation: route.hub,
+              hubStationName: hubLabel(route.hub),
+              layoverDuration: route.layoverDuration,
+              layoverHours: route.layoverHours,
+              leg1Date: railDateToIso(leg1Date),
+              leg2Date: railDateToIso(leg2Date),
+              leg1DepartureDate: route.leg1DepartureDate,
+              leg1ArrivalDate: route.leg1ArrivalDate,
+              leg2DepartureDate: route.leg2DepartureDate,
+              leg1Fare: f1,
+              leg2Fare: f2,
+              totalFare,
+              score: 50,
+              leg1: leg1Enriched,
+              leg2: leg2Enriched,
+              combinedConfirmationChance: null,
+              isHeritage: !!(route._isHeritage)
+            };
+            return res;
+          } catch {
+            return null;
+          }
+        }));
+        
+        for (const res of staticResults) {
+          if (res) {
+            validRoutes.push(res);
+          }
+        }
         break;
       }
       
@@ -2419,8 +2483,8 @@ export async function findSmartRoutes(source: string, dest: string, date: string
           const selectedClassUnavailable =
             selectedClassMissing(leg1Verified, classType) || selectedClassMissing(leg2Verified, classType);
 
-          const f1 = parseFloat(leg1Verified.fare.replace('₹', '')) || 0;
-          const f2 = parseFloat(leg2Verified.fare.replace('₹', '')) || 0;
+          const f1 = safeParseFare(leg1Verified.fare);
+          const f2 = safeParseFare(leg2Verified.fare);
           const totalFare = f1 > 0 && f2 > 0 ? f1 + f2 : 0;
 
           const predictionValues = [leg1Verified.confirmationChance, leg2Verified.confirmationChance]
@@ -2489,6 +2553,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     }
 
     const usedShapes = new Set<string>();
+    const usedShapesWithHubs = new Set<string>();
     const finalDiverseRoutes: SplitRouteResult[] = [];
 
     const sortedValid = validRoutes.sort((a, b) => b.score - a.score);
@@ -2498,11 +2563,25 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	      route.leg2.trainNo,
 	      route.leg2.journeyDate,
 	    ].map((value) => String(value || '').toUpperCase()).join('|');
-    const addRoute = (route: SplitRouteResult) => {
+
+    const splitShapeWithHubKey = (route: SplitRouteResult) => [
+	      route.leg1.trainNo,
+	      route.leg1.journeyDate,
+	      route.leg2.trainNo,
+	      route.leg2.journeyDate,
+	      route.hubStation,
+	    ].map((value) => String(value || '').toUpperCase()).join('|');
+
+    const addRoute = (route: SplitRouteResult, strictShape: boolean) => {
       if (!route || finalDiverseRoutes.length >= splitResultLimit) return false;
+      const hubKey = splitShapeWithHubKey(route);
+      if (usedShapesWithHubs.has(hubKey)) return false;
+      
       const shape = splitShapeKey(route);
-      if (usedShapes.has(shape)) return false;
+      if (strictShape && usedShapes.has(shape)) return false;
+
       usedShapes.add(shape);
+      usedShapesWithHubs.add(hubKey);
       finalDiverseRoutes.push(route);
       return true;
     };
@@ -2521,7 +2600,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     for (const group of groupOrder) {
       if (finalDiverseRoutes.length >= splitResultLimit) break;
       const route = groupedRoutes.get(group)?.[0];
-      if (route) addRoute(route);
+      if (route) addRoute(route, true);
     }
 
     const maxGroupSize = Math.max(...Array.from(groupedRoutes.values()).map((routes) => routes.length), 0);
@@ -2529,13 +2608,13 @@ export async function findSmartRoutes(source: string, dest: string, date: string
       for (const group of groupOrder) {
         if (finalDiverseRoutes.length >= splitResultLimit) break;
         const route = groupedRoutes.get(group)?.[index];
-        if (route) addRoute(route);
+        if (route) addRoute(route, true);
       }
     }
 
     for (const route of sortedValid) {
       if (finalDiverseRoutes.length >= splitResultLimit) break;
-      addRoute(route);
+      addRoute(route, false);
     }
 
     return finalDiverseRoutes;
