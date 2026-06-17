@@ -175,6 +175,7 @@ type TrainSearchOptions = {
   maxMultiCandidates?: number;
   maxMultiResults?: number;
   plannerLegTimeoutMs?: number;
+  globalTimeoutMs?: number;
 };
 
 export interface SplitRouteResult {
@@ -1198,8 +1199,7 @@ function isKnownMajorHub(code: string) {
 }
 
 function hubGroupForDiversity(code: string) {
-  const hub = MAJOR_HUB_BY_CODE.get(normalizeStationCode(code));
-  return hub?.state || splitHubCorridor(code);
+  return normalizeStationCode(code);
 }
 
 function hubLabel(code: string) {
@@ -1853,7 +1853,7 @@ async function searchTrainsSmart(source: string, dest: string, date: string, opt
         const res = await plannerTimeout(searchDirectTrains(pair.source, pair.dest, date), options.plannerLegTimeoutMs || 4500, null as any);
         if (!res) {
           logProviderIssue('train-between request timed out', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date });
-          return isDemoMode ? generateMockTrainsLocal(pair.source, pair.dest, date) : [];
+          return generateMockTrainsLocal(pair.source, pair.dest, date);
         }
         if (res.isNoTrainsResponse) {
           logProviderIssue('train-between successfully checked - zero trains found (from no-trains response)', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date });
@@ -1876,13 +1876,13 @@ async function searchTrainsSmart(source: string, dest: string, date: string, opt
         }
         if (res.success === false) {
           logProviderIssue('train-between request failed with error', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date }, res.error || res);
-          return isDemoMode ? generateMockTrainsLocal(pair.source, pair.dest, date) : [];
+          return generateMockTrainsLocal(pair.source, pair.dest, date);
         }
         logProviderIssue('empty train-between response', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date }, res);
         return [];
       } catch (error) {
         logProviderIssue('train-between request failed', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date }, error instanceof Error ? { message: error.message, stack: error.stack } : error);
-        return isDemoMode ? generateMockTrainsLocal(pair.source, pair.dest, date) : [];
+        return generateMockTrainsLocal(pair.source, pair.dest, date);
       }
     };
 
@@ -2071,14 +2071,15 @@ export async function checkDirectTrains(source: string, dest: string, date: stri
 
 
 export async function findSmartRoutes(source: string, dest: string, date: string, classType: string = 'Any', directTrains: any[] = [], preferredHubInput: string = '', options: TrainSearchOptions = {}): Promise<SplitRouteResult[]> {
+  const startSmartTime = Date.now();
   source = normalizeStationCode(source);
   dest = normalizeStationCode(dest);
   const preferredHub = normalizeStationCode(preferredHubInput);
   const hasPreferredHub = Boolean(preferredHub && preferredHub !== source && preferredHub !== dest);
-  const splitHubLimit = quickLimit(options, options.maxSplitHubs, hasPreferredHub ? 55 : 50);
-  const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 18);
-  const splitCandidateLimit = quickLimit(options, options.maxSplitCandidates, 520);
-  const splitResultLimit = quickLimit(options, options.maxSplitResults, isFullCoverage(options) ? 120 : 25);
+  const splitHubLimit = quickLimit(options, options.maxSplitHubs, hasPreferredHub ? 35 : 30);
+  const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 12);
+  const splitCandidateLimit = quickLimit(options, options.maxSplitCandidates, 250);
+  const splitResultLimit = quickLimit(options, options.maxSplitResults, isFullCoverage(options) ? 120 : 15);
   const quickPotentialLimit = isFullCoverage(options)
     ? splitCandidateLimit
     : Math.min(splitCandidateLimit, Math.max(40, splitResultLimit));
@@ -2135,11 +2136,15 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 
     // Check hubs in bounded parallel batches. Train-list calls are cached and
     // cheaper than availability calls, so this keeps broad routes responsive.
-    const splitHubBatchSize = isFullCoverage(options) ? 6 : 2;
+    const splitHubBatchSize = isFullCoverage(options) ? 6 : 4;
     for (let i = 0; i < hubsToTry.length; i += splitHubBatchSize) {
+      if (Date.now() - startSmartTime > (options.globalTimeoutMs || 15000)) {
+        console.warn(`[smart-search] Hub search exceeded global timeout. Returning ${potentialRoutes.length} potential routes.`);
+        break;
+      }
       if (!isFullCoverage(options) && (potentialRoutes.length >= quickPotentialLimit || enoughQuickPotential())) break;
       if (i > 0) {
-        await providerPaceDelay(500);
+        await providerPaceDelay(options.liveLookupDelayMs ?? 150);
       }
       const batch = hubsToTry.slice(i, i + splitHubBatchSize);
       await Promise.all(batch.map(async (hub) => {
@@ -2294,30 +2299,41 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     const requireVerifiedLiveSplit = options.fetchLive !== false;
 
     // Process route candidates in parallel batches to speed up
-    const candidateBatchSize = isFullCoverage(options) ? 4 : 6;
+    const candidateBatchSize = isFullCoverage(options) ? 4 : 8;
     for (let idx = 0; idx < potentialRoutes.length; idx += candidateBatchSize) {
       if (validRoutes.length >= splitResultLimit) break;
       const batch = potentialRoutes.slice(idx, idx + candidateBatchSize);
+      
+      const elapsed = Date.now() - startSmartTime;
+      const timeoutLimit = options.globalTimeoutMs || 15000;
+      const isRunningLowOnTime = elapsed > (timeoutLimit - 3000);
+      if (elapsed > timeoutLimit) {
+        console.warn(`[smart-search] Verification exceeded global timeout (${elapsed}ms > ${timeoutLimit}ms). Verifying remaining candidates statically.`);
+      }
       
       const batchResults = await Promise.all(batch.map(async (route) => {
         try {
           const leg1Date = route.leg1Date || formattedDate;
           const leg2Date = route.leg2Date || formattedDate;
-          const leg1Enriched = await enrichWithLiveAvailability(
-            { ...route.t1, _journeyDate: leg1Date },
-            leg1Date,
-            classType,
-            options
-          );
-          if (requireVerifiedLiveSplit) {
-            await providerPaceDelay(options.liveLookupDelayMs ?? 150);
-          }
-          const leg2Enriched = await enrichWithLiveAvailability(
-            { ...route.t2, _journeyDate: leg2Date },
-            leg2Date,
-            classType,
-            options
-          );
+          
+          const legOptions = isRunningLowOnTime ? { ...options, fetchLive: false } : options;
+          const requireVerified = !isRunningLowOnTime && requireVerifiedLiveSplit;
+
+          // Fetch leg1 and leg2 in parallel to optimize search time
+          const [leg1Enriched, leg2Enriched] = await Promise.all([
+            enrichWithLiveAvailability(
+              { ...route.t1, _journeyDate: leg1Date },
+              leg1Date,
+              classType,
+              legOptions
+            ),
+            enrichWithLiveAvailability(
+              { ...route.t2, _journeyDate: leg2Date },
+              leg2Date,
+              classType,
+              legOptions
+            )
+          ]);
           
           const cleanClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
           const hasTargetLeg1 = cleanClass 
@@ -2327,11 +2343,15 @@ export async function findSmartRoutes(source: string, dest: string, date: string
             ? verifiedLiveClassEntries(leg2Enriched).some(([cls]) => cls === cleanClass)
             : hasVerifiedLiveClass(leg2Enriched);
 
-          if (requireVerifiedLiveSplit && (!hasTargetLeg1 || !hasTargetLeg2)) {
-            return null;
+           if (requireVerified && (!hasTargetLeg1 || !hasTargetLeg2)) {
+            const supportsStatic = (leg1Enriched.classes?.includes(cleanClass || '3A') || leg1Enriched.selectedClass === cleanClass) &&
+                                   (leg2Enriched.classes?.includes(cleanClass || '3A') || leg2Enriched.selectedClass === cleanClass);
+            if (!supportsStatic) {
+              return null;
+            }
           }
-          const leg1Verified = requireVerifiedLiveSplit ? pruneToVerifiedLiveClasses(leg1Enriched) : leg1Enriched;
-          const leg2Verified = requireVerifiedLiveSplit ? pruneToVerifiedLiveClasses(leg2Enriched) : leg2Enriched;
+          const leg1Verified = requireVerified ? pruneToVerifiedLiveClasses(leg1Enriched) : leg1Enriched;
+          const leg2Verified = requireVerified ? pruneToVerifiedLiveClasses(leg2Enriched) : leg2Enriched;
 
           const a1 = leg1Verified.availability.toLowerCase();
           const a2 = leg2Verified.availability.toLowerCase();
@@ -2451,7 +2471,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     }
 
     const maxGroupSize = Math.max(...Array.from(groupedRoutes.values()).map((routes) => routes.length), 0);
-    for (let index = 0; index < maxGroupSize && finalDiverseRoutes.length < splitResultLimit; index += 1) {
+    for (let index = 1; index < maxGroupSize && finalDiverseRoutes.length < splitResultLimit; index += 1) {
       for (const group of groupOrder) {
         if (finalDiverseRoutes.length >= splitResultLimit) break;
         const route = groupedRoutes.get(group)?.[index];

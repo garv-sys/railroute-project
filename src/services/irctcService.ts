@@ -48,22 +48,22 @@ const providerCache = new ProviderCache({
 });
 
 const availabilityCache = new ProviderCache({
-  maxConcurrency: 5,
+  maxConcurrency: 8,
   retryCount: 2,
   retryDelayMs: 600,
   failureTtlMs: 0,
   staleWhileRevalidateMultiplier: 1,
-  timeoutMs: 12_000,
+  timeoutMs: 5000,
   loggerPrefix: 'irctc-connect-availability',
 });
 
 const trainListCache = new ProviderCache({
-  maxConcurrency: 6,
+  maxConcurrency: 12,
   retryCount: 0,
   retryDelayMs: 750,
   failureTtlMs: 10_000,
   staleWhileRevalidateMultiplier: 1,
-  timeoutMs: 25_000,
+  timeoutMs: 5000,
   loggerPrefix: 'irctc-connect-train-list',
 });
 
@@ -74,6 +74,8 @@ class APIQueue {
     reject: (reason?: unknown) => void;
   }> = [];
   private running = 0;
+  private nextProcessTime = 0;
+  private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly maxConcurrent = 3, private readonly minDelay = 300) {}
 
@@ -93,30 +95,50 @@ class APIQueue {
         resolve: resolve as (value: unknown) => void,
         reject,
       });
-      void this.process();
+      this.scheduleNext();
     });
   }
 
-  private async process() {
+  private scheduleNext() {
+    if (this.timer) return;
+    if (this.queue.length === 0) return;
     if (this.running >= this.maxConcurrent) return;
+
+    const now = Date.now();
+    const delay = Math.max(0, this.nextProcessTime - now);
+    
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.executeNext();
+    }, delay);
+  }
+
+  private async executeNext() {
+    if (this.running >= this.maxConcurrent) {
+      this.scheduleNext();
+      return;
+    }
     const item = this.queue.shift();
     if (!item) return;
 
     this.running += 1;
-    await new Promise((resolve) => setTimeout(resolve, this.minDelay));
+    this.nextProcessTime = Date.now() + this.minDelay;
+    
+    this.scheduleNext();
+
     try {
       item.resolve(await item.fn());
     } catch (error) {
       item.reject(error);
     } finally {
       this.running -= 1;
-      void this.process();
+      this.scheduleNext();
     }
   }
 }
 
-const irctcQueue = new APIQueue(5, 120);
-const trainListQueue = new APIQueue(8, 60);
+const irctcQueue = new APIQueue(8, 80);
+const trainListQueue = new APIQueue(12, 40);
 let availabilityCooldownUntil = 0;
 let trainListCooldownUntil = 0;
 
@@ -231,11 +253,11 @@ export async function searchDirectTrains(fromStn: string, toStn: string, date?: 
   return trainListCache.fetch(key, async () => {
     try {
       ensureIrctcConfigured();
-      const primary = await trainListQueue.add(() => callWithRetry(
-        () => trackProviderCall('train-list', `${fromStn}->${toStn}:${dateStr}`, () => searchTrainBetweenStations(fromStn, toStn, dateStr)),
-        4,
+      const primary = await callWithRetry(
+        () => trainListQueue.add(() => trackProviderCall('train-list', `${fromStn}->${toStn}:${dateStr}`, () => searchTrainBetweenStations(fromStn, toStn, dateStr))),
+        2,
         'train-list'
-      ));
+      );
       if (isRateLimitedResult(primary)) {
         throw new Error('IRCTC train-list request rate limited after retries.');
       }
@@ -293,10 +315,11 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
   const key = `avail_${trainNo}_${fromStn}_${toStn}_${dateStr}_${classType}_${quota}`;
   return availabilityCache.fetch(key, async () => {
     ensureIrctcConfigured();
-    const response: any = await irctcQueue.add(() => callWithRetry(
-      () => trackProviderCall('availability', `${trainNo}:${fromStn}->${toStn}:${dateStr}:${classType}:${quota}`, () => getAvailability(trainNo, fromStn, toStn, dateStr, classType, quota)),
-      8
-    ));
+    const response: any = await callWithRetry(
+      () => irctcQueue.add(() => trackProviderCall('availability', `${trainNo}:${fromStn}->${toStn}:${dateStr}:${classType}:${quota}`, () => getAvailability(trainNo, fromStn, toStn, dateStr, classType, quota))),
+      2,
+      'availability'
+    );
     const rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
     const fare = response?.data?.fare;
     if (!fare || rows.length === 0) {

@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       query.destination,
       query.date,
       query.classType,
-      { debug: true, fetchLive: true, liveLookupLimit: 50, exactStationOnly: false, providerPairLimit: 6, plannerLegTimeoutMs: 5000 }
+      { debug: true, fetchLive: true, liveLookupLimit: 15, exactStationOnly: false, providerPairLimit: 6, plannerLegTimeoutMs: 5000 }
     );
 
     if (!trains.length) {
