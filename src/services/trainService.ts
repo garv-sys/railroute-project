@@ -1119,8 +1119,8 @@ export function isHubOnPath(source: { lat: number; lon: number }, hub: { lat: nu
 
 const USER_PRIORITY_HUBS = new Set([
   'DDU', 'MGS',
-  'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE',
-  'PRYJ', 'ALD', 'PRRB', 'PCOI',
+  'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE', 'DEC', 'GGN',
+  'PRYJ', 'ALD', 'PRRB', 'PCOI', 'SFG',
   'LKO', 'LJN',
   'CNB',
   'BSB', 'BSBS'
