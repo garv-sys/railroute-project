@@ -1221,7 +1221,20 @@ function isKnownMajorHub(code: string) {
 }
 
 function hubGroupForDiversity(code: string) {
-  return normalizeStationCode(code);
+  const normalized = normalizeStationCode(code);
+  if (['NDLS', 'DLI', 'NZM', 'ANVT', 'DEE', 'DEC', 'GGN'].includes(normalized)) {
+    return 'DELHI_GGN';
+  }
+  if (['BSB', 'BSBS', 'BCY', 'MGS', 'DDU'].includes(normalized)) {
+    return 'VARANASI_DDU';
+  }
+  if (['PRYJ', 'ALD', 'PRRB', 'PCOI', 'SFG'].includes(normalized)) {
+    return 'PRAYAGRAJ';
+  }
+  if (['LKO', 'LJN'].includes(normalized)) {
+    return 'LUCKNOW';
+  }
+  return normalized;
 }
 
 function hubLabel(code: string) {
@@ -2092,16 +2105,83 @@ export async function checkDirectTrains(source: string, dest: string, date: stri
 }
 
 
+const cleanTrainNo = (num: any): string => {
+  if (!num) return '';
+  return String(num).trim().replace(/^0+/, '');
+};
+
+const directCheckCache = new Map<string, boolean>();
+
+function isTrainDirectBetweenAreas(stations: string[], source: string, dest: string): boolean {
+  const sourceCluster = sameAreaTerminalClusterFor(source, 45);
+  const destCluster = sameAreaTerminalClusterFor(dest, 45);
+  const sourceCoord = stationCoordinatesForRouting(source);
+  const destCoord = stationCoordinatesForRouting(dest);
+  
+  let earliestSrcIdx = Number.MAX_SAFE_INTEGER;
+  let latestDstIdx = -1;
+  
+  for (let i = 0; i < stations.length; i++) {
+    const st = stations[i];
+    
+    // Check if it's in the terminal cluster
+    let isSrcClose = sourceCluster.includes(st);
+    let isDstClose = destCluster.includes(st);
+    
+    // Check geographical distance if coordinates are available
+    if (!isSrcClose && sourceCoord) {
+      const stCoord = stationCoordinatesForRouting(st);
+      if (stCoord && haversineKm(sourceCoord, stCoord) <= 45) {
+        isSrcClose = true;
+      }
+    }
+    if (!isDstClose && destCoord) {
+      const stCoord = stationCoordinatesForRouting(st);
+      if (stCoord && haversineKm(destCoord, stCoord) <= 45) {
+        isDstClose = true;
+      }
+    }
+    
+    if (isSrcClose) {
+      if (i < earliestSrcIdx) earliestSrcIdx = i;
+    }
+    if (isDstClose) {
+      if (i > latestDstIdx) latestDstIdx = i;
+    }
+  }
+  
+  return earliestSrcIdx !== Number.MAX_SAFE_INTEGER && latestDstIdx !== -1 && earliestSrcIdx < latestDstIdx;
+}
+
+async function isDirectTrainEver(trainNo: string, source: string, dest: string): Promise<boolean> {
+  const cacheKey = `${trainNo}_${source}_${dest}`;
+  if (directCheckCache.has(cacheKey)) {
+    return directCheckCache.get(cacheKey)!;
+  }
+  
+  try {
+    const schedule = await getTrainSchedule(trainNo);
+    if (schedule && schedule.success !== false && schedule.data && schedule.data.route) {
+      const route = schedule.data.route;
+      const stations = route.map((r: any) => normalizeStationCode(r.stnCode || r.stationCode || ''));
+      const isDirect = isTrainDirectBetweenAreas(stations, source, dest);
+      directCheckCache.set(cacheKey, isDirect);
+      return isDirect;
+    }
+  } catch (e) {
+    console.warn(`[isDirectTrainEver] Failed to check train schedule for ${trainNo}:`, e);
+  }
+  
+  directCheckCache.set(cacheKey, false);
+  return false;
+}
+
+
 export async function findSmartRoutes(source: string, dest: string, date: string, classType: string = 'Any', directTrains: any[] = [], preferredHubInput: string = '', options: TrainSearchOptions = {}): Promise<SplitRouteResult[]> {
   const startSmartTime = Date.now();
   source = normalizeStationCode(source);
   dest = normalizeStationCode(dest);
   const formattedDate = formatDateStr(date);
-
-  const cleanTrainNo = (num: any): string => {
-    if (!num) return '';
-    return String(num).trim().replace(/^0+/, '');
-  };
 
   const directTrainNos = new Set<string>();
   const directTrainNames = new Set<string>();
@@ -2221,6 +2301,21 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	          );
 	          const l2Trains = l2TrainGroups.flat();
 
+            // Filter out any trains that are direct trains between source and destination on any day
+            const uniqueTrainNos = Array.from(new Set([
+              ...l1Trains.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)),
+              ...l2Trains.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno))
+            ].filter(Boolean)));
+            
+            const directStatusMap = new Map<string, boolean>();
+            await Promise.all(uniqueTrainNos.map(async (num) => {
+              const isDirect = await isDirectTrainEver(num, source, dest);
+              directStatusMap.set(num, isDirect);
+            }));
+            
+            const filteredL1 = l1Trains.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+            const filteredL2 = l2Trains.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+
           const sortLogic = (a: any, b: any) => {
             const aDaily = a.running_days === '1111111' ? 1 : 0;
             const bDaily = b.running_days === '1111111' ? 1 : 0;
@@ -2230,17 +2325,17 @@ export async function findSmartRoutes(source: string, dest: string, date: string
             return aSpecial - bSpecial;
           };
 
-          if (l1Trains.length > 0 && l2Trains.length > 0) {
-            l1Trains.sort(sortLogic);
-            l2Trains.sort(sortLogic);
+          if (filteredL1.length > 0 && filteredL2.length > 0) {
+            filteredL1.sort(sortLogic);
+            filteredL2.sort(sortLogic);
 
             let routesForHub = 0;
             const maxRoutesPerHub = isFullCoverage(options) ? 100 : 8;
 
             // Explore the provider grid until quick mode has enough route shapes.
             routeGrid:
-            for (const t1 of takeForCoverage(l1Trains, splitLegLimit)) {
-              for (const t2 of takeForCoverage(l2Trains, splitLegLimit)) {
+            for (const t1 of takeForCoverage(filteredL1, splitLegLimit)) {
+              for (const t2 of takeForCoverage(filteredL2, splitLegLimit)) {
                 const trainNo1 = String(t1.trainNo || t1.train_no || t1.train_number || t1.trainno || '').trim();
                 const trainNo2 = String(t2.trainNo || t2.train_no || t2.train_number || t2.trainno || '').trim();
                 const cleanT1 = cleanTrainNo(trainNo1);
@@ -2572,8 +2667,17 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	      route.hubStation,
 	    ].map((value) => String(value || '').toUpperCase()).join('|');
 
-    const addRoute = (route: SplitRouteResult, strictShape: boolean) => {
+    const hubGroupCounts = new Map<string, number>();
+
+    const addRoute = (route: SplitRouteResult, strictShape: boolean, enforceGroupLimit: boolean) => {
       if (!route || finalDiverseRoutes.length >= splitResultLimit) return false;
+
+      const group = hubGroupForDiversity(route.hubStation);
+      if (enforceGroupLimit) {
+        const count = hubGroupCounts.get(group) || 0;
+        if (count >= 3) return false;
+      }
+
       const hubKey = splitShapeWithHubKey(route);
       if (usedShapesWithHubs.has(hubKey)) return false;
       
@@ -2582,6 +2686,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 
       usedShapes.add(shape);
       usedShapesWithHubs.add(hubKey);
+      hubGroupCounts.set(group, (hubGroupCounts.get(group) || 0) + 1);
       finalDiverseRoutes.push(route);
       return true;
     };
@@ -2597,24 +2702,36 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     const groupOrder = Array.from(groupedRoutes.keys())
       .sort((a, b) => (groupedRoutes.get(b)?.[0]?.score || 0) - (groupedRoutes.get(a)?.[0]?.score || 0));
 
+    // First round: index 0 from all groups (with shape uniqueness and group limit of 3)
     for (const group of groupOrder) {
       if (finalDiverseRoutes.length >= splitResultLimit) break;
       const route = groupedRoutes.get(group)?.[0];
-      if (route) addRoute(route, true);
+      if (route) addRoute(route, true, true);
     }
 
+    // Second round: index 1, 2, 3... (with shape uniqueness and group limit of 3)
     const maxGroupSize = Math.max(...Array.from(groupedRoutes.values()).map((routes) => routes.length), 0);
     for (let index = 1; index < maxGroupSize && finalDiverseRoutes.length < splitResultLimit; index += 1) {
       for (const group of groupOrder) {
         if (finalDiverseRoutes.length >= splitResultLimit) break;
         const route = groupedRoutes.get(group)?.[index];
-        if (route) addRoute(route, true);
+        if (route) addRoute(route, true, true);
       }
     }
 
+    // Third round: relaxed group limit but still enforcing shape uniqueness
+    for (let index = 1; index < maxGroupSize && finalDiverseRoutes.length < splitResultLimit; index += 1) {
+      for (const group of groupOrder) {
+        if (finalDiverseRoutes.length >= splitResultLimit) break;
+        const route = groupedRoutes.get(group)?.[index];
+        if (route) addRoute(route, true, false);
+      }
+    }
+
+    // Fourth round: fallback to add remaining routes without strict shape uniqueness if we still have slots
     for (const route of sortedValid) {
       if (finalDiverseRoutes.length >= splitResultLimit) break;
-      addRoute(route, false);
+      addRoute(route, false, false);
     }
 
     return finalDiverseRoutes;
@@ -2715,9 +2832,27 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
 
         if (!leg1Options.length || !leg2Options.length || !leg3Options.length) continue;
 
-        for (const t1 of pickLikelyTrains(leg1Options, multiLegLimit)) {
-          for (const t2 of pickLikelyTrains(leg2Options, multiLegLimit)) {
-            for (const t3 of pickLikelyTrains(leg3Options, multiLegLimit)) {
+        const uniqueTrainNos = Array.from(new Set([
+          ...leg1Options.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)),
+          ...leg2Options.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)),
+          ...leg3Options.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno))
+        ].filter(Boolean)));
+
+        const directStatusMap = new Map<string, boolean>();
+        await Promise.all(uniqueTrainNos.map(async (num) => {
+          const isDirect = await isDirectTrainEver(num, source, dest);
+          directStatusMap.set(num, isDirect);
+        }));
+
+        const filteredL1 = leg1Options.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+        const filteredL2 = leg2Options.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+        const filteredL3 = leg3Options.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+
+        if (!filteredL1.length || !filteredL2.length || !filteredL3.length) continue;
+
+        for (const t1 of pickLikelyTrains(filteredL1, multiLegLimit)) {
+          for (const t2 of pickLikelyTrains(filteredL2, multiLegLimit)) {
+            for (const t3 of pickLikelyTrains(filteredL3, multiLegLimit)) {
               if (rawTrainDestination(t1) !== rawTrainSource(t2) || rawTrainDestination(t2) !== rawTrainSource(t3)) continue;
 
               const arr1 = normalizeLegTime(rawTrainArrival(t1), formattedDate);
