@@ -1,7 +1,7 @@
 import { searchDirectTrains, checkSeatAvailability, getTrainSchedule } from './irctcService';
 import MAJOR_HUBS from '@/data/major_hubs.json';
 import { buildTrustMeta } from '@/lib/confidence';
-import { STATION_COORDS, stationLabelFromCode } from '@/lib/railway-intelligence';
+import { STATION_COORDS } from '@/lib/railway-intelligence';
 import {
   availabilityReasonForStatus,
   fareReasonForStatus,
@@ -121,6 +121,10 @@ export interface ClassAvailabilityItem {
   fareStatus?: LookupTrustStatus;
   lookupReason?: string;
   proof?: LookupProof;
+  seatsAvailable?: number;
+  racCount?: number;
+  waitingListCount?: number;
+  lastUpdated?: string;
 }
 
 export interface TrainResult {
@@ -176,7 +180,6 @@ type TrainSearchOptions = {
   maxMultiResults?: number;
   plannerLegTimeoutMs?: number;
   globalTimeoutMs?: number;
-  allowMixedClassSplits?: boolean;
 };
 
 export interface SplitRouteResult {
@@ -208,22 +211,6 @@ export interface MultiSplitRouteResult {
   totalDuration: string;
   score: number;
   combinedConfirmationChance?: number | null;
-}
-
-export interface GodModeHubCandidate {
-  code: string;
-  name: string;
-  rank: number;
-  score: number;
-  confidence: number;
-  importance: number;
-  trainDensity: number;
-  connectivity: number;
-  geographicRelevance: number;
-  progress: number;
-  distanceFromSourceKm: number;
-  distanceToDestinationKm: number;
-  reasons: string[];
 }
 
 function parseTime(timeStr: string, baseDate: string) {
@@ -1149,125 +1136,8 @@ const USER_PRIORITY_HUBS = new Set([
   'LKO', 'LJN',
   'CNB',
   'BSB', 'BSBS',
-  'AGC', 'TDL', 'MTJ',
-  'KOTA', 'SWM', 'JP', 'GADJ', 'FL', 'AII'
+  'JP', 'KOTA', 'AII'
 ]);
-
-const STRATEGIC_SPLIT_HUBS = [
-  'DDU', 'MGS', 'BSB', 'BSBS', 'PRYJ', 'ALD',
-  'CNB', 'LKO', 'LJN',
-  'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE',
-  'TDL', 'AGC', 'MTJ',
-  'KOTA', 'SWM', 'JP', 'GADJ', 'FL', 'AII',
-];
-
-const DELHI_SPLIT_HUBS = ['NDLS', 'DLI', 'NZM', 'ANVT'];
-
-const HUB_IMPORTANCE: Record<string, number> = {
-  NDLS: 100, DLI: 96, NZM: 94, ANVT: 88, DEE: 82,
-  CNB: 96, PRYJ: 95, ALD: 90, DDU: 94, MGS: 88, BSB: 86, BSBS: 78,
-  LKO: 90, LJN: 82, AGC: 84, TDL: 82, MTJ: 78,
-  KOTA: 92, SWM: 82, JP: 88, GADJ: 72, FL: 76, AII: 84,
-};
-
-const HUB_TRAIN_DENSITY: Record<string, number> = {
-  NDLS: 100, DLI: 94, NZM: 92, ANVT: 86, DEE: 80,
-  CNB: 96, PRYJ: 94, ALD: 88, DDU: 92, MGS: 86, BSB: 84, BSBS: 76,
-  LKO: 90, LJN: 80, AGC: 84, TDL: 82, MTJ: 76,
-  KOTA: 90, SWM: 78, JP: 86, GADJ: 70, FL: 76, AII: 82,
-};
-
-function hubDisplayName(code: string) {
-  const normalized = normalizeStationCode(code);
-  const hub = MAJOR_HUB_BY_CODE.get(normalized);
-  if (hub) return `${hub.name} (${hub.code})`;
-  return stationLabelFromCode(normalized);
-}
-
-function scoredHubCandidate(sourceCoord: { lat: number; lon: number }, destCoord: { lat: number; lon: number }, code: string) {
-  const normalized = normalizeStationCode(code);
-  const coord = stationCoordinatesForRouting(normalized);
-  if (!coord) return null;
-
-  const directDistance = Math.max(1, haversineKm(sourceCoord, destCoord));
-  const sourceDistance = haversineKm(sourceCoord, coord);
-  const destDistance = haversineKm(coord, destCoord);
-  const progress = hubRouteProgress(sourceCoord, destCoord, coord);
-  const detourRatio = (sourceDistance + destDistance) / directDistance;
-  const corridorPenalty = Math.min(1, Math.abs(Math.max(0, Math.min(1, progress)) - progress) * 1.4);
-  const geographicRelevance = Math.max(0, Math.min(100, 125 - (detourRatio - 1) * 95 - corridorPenalty * 45 - Math.abs(progress - 0.5) * 18));
-  const importance = HUB_IMPORTANCE[normalized] ?? (USER_PRIORITY_HUBS.has(normalized) ? 74 : 58);
-  const trainDensity = HUB_TRAIN_DENSITY[normalized] ?? (isKnownMajorHub(normalized) ? 68 : 48);
-  const connectivity = Math.max(0, Math.min(100, (importance * 0.58) + (trainDensity * 0.42)));
-  const score = Math.round((geographicRelevance * 0.44) + (importance * 0.24) + (trainDensity * 0.2) + (connectivity * 0.12));
-  const reasons = [
-    importance >= 85 ? 'major interchange' : 'usable interchange',
-    trainDensity >= 85 ? 'high train density' : 'corridor coverage',
-    geographicRelevance >= 76 ? 'strong route geometry' : 'strategic detour',
-  ];
-
-  return {
-    code: normalized,
-    name: hubDisplayName(normalized),
-    score,
-    confidence: Math.max(40, Math.min(99, score)),
-    importance,
-    trainDensity,
-    connectivity: Math.round(connectivity),
-    geographicRelevance: Math.round(geographicRelevance),
-    progress: Number(Math.max(0, Math.min(1, progress)).toFixed(2)),
-    distanceFromSourceKm: Math.round(sourceDistance),
-    distanceToDestinationKm: Math.round(destDistance),
-    reasons,
-  };
-}
-
-export function godModeHubCandidates(source: string, dest: string, preferredHub = '', limit = 8): GodModeHubCandidate[] {
-  const normalizedSource = normalizeStationCode(source);
-  const normalizedDest = normalizeStationCode(dest);
-  const sourceCoord = stationCoordinatesForRouting(normalizedSource);
-  const destCoord = stationCoordinatesForRouting(normalizedDest);
-  const preferred = normalizeStationCode(preferredHub);
-  const excluded = new Set([normalizedSource, normalizedDest]);
-
-  if (!sourceCoord || !destCoord) {
-    return Array.from(new Set([preferred, ...STRATEGIC_SPLIT_HUBS, ...dynamicSplitHubCandidates(source, dest, preferredHub, limit * 2)].filter(Boolean)))
-      .filter((code) => !excluded.has(code))
-      .slice(0, limit)
-      .map((code, index) => ({
-        code,
-        name: hubDisplayName(code),
-        rank: index + 1,
-        score: Math.max(50, 95 - index * 5),
-        confidence: Math.max(50, 95 - index * 5),
-        importance: HUB_IMPORTANCE[code] ?? 60,
-        trainDensity: HUB_TRAIN_DENSITY[code] ?? 55,
-        connectivity: HUB_IMPORTANCE[code] ?? 60,
-        geographicRelevance: 50,
-        progress: 0.5,
-        distanceFromSourceKm: 0,
-        distanceToDestinationKm: 0,
-        reasons: ['strategic fallback'],
-      }));
-  }
-
-  const dynamic = dynamicSplitHubCandidates(source, dest, preferredHub, 18);
-  const pool = Array.from(new Set([preferred, ...STRATEGIC_SPLIT_HUBS, ...dynamic].filter(Boolean)))
-    .filter((code) => !excluded.has(code));
-  const scored = Array.from(new Map(pool
-    .map((code) => scoredHubCandidate(sourceCoord, destCoord, code))
-    .filter((candidate): candidate is Omit<GodModeHubCandidate, 'rank'> => Boolean(candidate))
-    .map((candidate) => [candidate.code, candidate] as const)
-  ).values())
-    .sort((a, b) => {
-      if (preferred && a.code === preferred) return -1;
-      if (preferred && b.code === preferred) return 1;
-      return b.score - a.score;
-    })
-    .slice(0, Math.max(5, Math.min(8, limit)));
-
-  return scored.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
-}
 
 export function dynamicSplitHubCandidates(source: string, dest: string, preferredHub = '', limit = Number.POSITIVE_INFINITY) {
   const normalizedSource = normalizeStationCode(source);
@@ -1323,10 +1193,9 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     ? NATIONAL_LONG_DISTANCE_SPLIT_HUBS.filter((hub) => !excluded.has(hub))
     : [];
   
-  const candidates = Array.from(new Set([preferred, ...nearbySourceHubs, ...nearbyDestHubs, ...STRATEGIC_SPLIT_HUBS, ...longDistancePriorityHubs, ...sorted.map((hub) => hub.code)].filter(Boolean)));
+  const candidates = Array.from(new Set([preferred, ...nearbySourceHubs, ...nearbyDestHubs, ...longDistancePriorityHubs, ...sorted.map((hub) => hub.code)].filter(Boolean)));
   const filteredCandidates = candidates.filter((hubCode) => {
     if (hubCode === preferred) return true;
-    if (USER_PRIORITY_HUBS.has(hubCode)) return true;
     if (nearbySourceHubs.includes(hubCode)) return true;
     if (nearbyDestHubs.includes(hubCode)) return true;
     const hubCoord = stationCoordinatesForRouting(hubCode);
@@ -1347,24 +1216,6 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
   };
   
   filteredCandidates.sort((a, b) => getHubScore(a) - getHubScore(b));
-
-  const shouldPinDelhi = directDistance >= 450 &&
-    !terminalClusterFor(normalizedSource).some((code) => DELHI_SPLIT_HUBS.includes(code)) &&
-    !terminalClusterFor(normalizedDest).some((code) => DELHI_SPLIT_HUBS.includes(code));
-  if (shouldPinDelhi) {
-    const pinnedDelhi = DELHI_SPLIT_HUBS.filter((code) => filteredCandidates.includes(code));
-    const nonDelhi = filteredCandidates.filter((code) => !pinnedDelhi.includes(code));
-    filteredCandidates.splice(
-      0,
-      filteredCandidates.length,
-      ...Array.from(new Set([
-        preferred,
-        ...nonDelhi.slice(0, 4),
-        ...pinnedDelhi,
-        ...nonDelhi.slice(4),
-      ].filter(Boolean)))
-    );
-  }
   
   return takeForCoverage(filteredCandidates, limit);
 }
@@ -2367,7 +2218,6 @@ export async function findSmartRoutes(source: string, dest: string, date: string
   const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 40);
   const splitCandidateLimit = quickLimit(options, options.maxSplitCandidates, 250);
   const splitResultLimit = quickLimit(options, options.maxSplitResults, isFullCoverage(options) ? 120 : 15);
-  const allowMixedClassSplits = Boolean(options.allowMixedClassSplits);
   const quickPotentialLimit = isFullCoverage(options)
     ? splitCandidateLimit
     : Math.min(splitCandidateLimit, Math.max(40, splitResultLimit));
@@ -2385,35 +2235,8 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     const formattedDate = formatDateStr(date);
     let hubsToTry = dynamicSplitHubCandidates(source, dest, preferredHub, splitHubLimit);
 
-    // Dynamic hub selection from active routes
-    try {
-      if (directTrains.length > 0) {
-        for (const train of directTrains) {
-          const info = await getTrainSchedule(train.trainNo);
-          if (info && info.data && info.data.route) {
-            const route = info.data.route.map((r: any) => r.stnCode);
-            const srcIdx = route.indexOf(source);
-            const dstIdx = route.indexOf(dest);
-            
-            if (srcIdx !== -1 && dstIdx !== -1 && srcIdx < dstIdx) {
-              const intermediate = route.slice(srcIdx + 1, dstIdx);
-              if (intermediate.length >= 2) {
-                const dynamicHubs = [
-                  intermediate[Math.floor(intermediate.length * 0.33)],
-                  intermediate[Math.floor(intermediate.length * 0.66)]
-                ].filter(Boolean);
-                
-                hubsToTry = prioritizePreferredHub([...dynamicHubs, ...hubsToTry]);
-                console.log(`[Smart Routing] Dynamic geographical hubs:`, dynamicHubs);
-                break; 
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to extract dynamic route hubs:", e);
-    }
+    // Dynamic hub extraction skipped in quick mode — getTrainSchedule adds latency per train.
+    // Hub candidates from dynamicSplitHubCandidates() already cover the route corridor.
     hubsToTry = takeForCoverage(expandSplitHubAliases(prioritizePreferredHub(hubsToTry)), splitHubLimit);
     let potentialRoutes: any[] = [];
     const enoughQuickPotential = () => {
@@ -2455,20 +2278,10 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	          );
 	          const l2Trains = l2TrainGroups.flat();
 
-            // Filter out any trains that are direct trains between source and destination on any day
-            const uniqueTrainNos = Array.from(new Set([
-              ...l1Trains.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)),
-              ...l2Trains.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno))
-            ].filter(Boolean)));
-            
-            const directStatusMap = new Map<string, boolean>();
-            await Promise.all(uniqueTrainNos.map(async (num) => {
-              const isDirect = await isDirectTrainEver(num, source, dest);
-              directStatusMap.set(num, isDirect);
-            }));
-            
-            const filteredL1 = l1Trains.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
-            const filteredL2 = l2Trains.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+            // Filter out trains already known to be direct (from directTrainNos set built above).
+            // isDirectTrainEver() is skipped here — it fires getTrainSchedule per train (too slow).
+            const filteredL1 = l1Trains.filter(t => !directTrainNos.has(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+            const filteredL2 = l2Trains.filter(t => !directTrainNos.has(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
 
           const sortLogic = (a: any, b: any) => {
             const aDaily = a.running_days === '1111111' ? 1 : 0;
@@ -2512,7 +2325,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
                 if (destCode1.toUpperCase() !== srcCode2.toUpperCase()) continue;
 
                   const requestedSplitClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
-                  if (requestedSplitClass && !allowMixedClassSplits) {
+                  if (requestedSplitClass) {
                     if (!legSupportsRequestedClass(t1, requestedSplitClass) || !legSupportsRequestedClass(t2, requestedSplitClass)) {
                       continue;
                     }
@@ -2691,22 +2504,22 @@ export async function findSmartRoutes(source: string, dest: string, date: string
             enrichWithLiveAvailability(
               { ...route.t1, _journeyDate: leg1Date },
               leg1Date,
-              allowMixedClassSplits ? 'Any' : classType,
+              classType,
               legOptions
             ),
             enrichWithLiveAvailability(
               { ...route.t2, _journeyDate: leg2Date },
               leg2Date,
-              allowMixedClassSplits ? 'Any' : classType,
+              classType,
               legOptions
             )
           ]);
           
           const cleanClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
-          const hasTargetLeg1 = cleanClass && !allowMixedClassSplits
+          const hasTargetLeg1 = cleanClass 
             ? verifiedLiveClassEntries(leg1Enriched).some(([cls]) => cls === cleanClass)
             : hasVerifiedLiveClass(leg1Enriched);
-          const hasTargetLeg2 = cleanClass && !allowMixedClassSplits
+          const hasTargetLeg2 = cleanClass 
             ? verifiedLiveClassEntries(leg2Enriched).some(([cls]) => cls === cleanClass)
             : hasVerifiedLiveClass(leg2Enriched);
 
@@ -2729,9 +2542,8 @@ export async function findSmartRoutes(source: string, dest: string, date: string
           ) {
             return null;
           }
-          const selectedClassUnavailable = !allowMixedClassSplits && (
-            selectedClassMissing(leg1Verified, classType) || selectedClassMissing(leg2Verified, classType)
-          );
+          const selectedClassUnavailable =
+            selectedClassMissing(leg1Verified, classType) || selectedClassMissing(leg2Verified, classType);
 
           const f1 = safeParseFare(leg1Verified.fare);
           const f2 = safeParseFare(leg2Verified.fare);
