@@ -284,6 +284,11 @@ export function TrainResultsWorkspace() {
         return trainName.includes(query) || trainNo.includes(query);
       });
     }
+    unverified = unverified.filter((train) => {
+      const reqClass = selectedSortClass || primaryClassCode(train);
+      const availText = train?.classAvailability?.[reqClass]?.[0]?.text || train?.classAvailability?.[reqClass]?.[0]?.availabilityText || train?.availability;
+      return !isUnavailableRailStatus(availText);
+    });
     const sortedUnverified = [...unverified].sort((a, b) => {
       const fareA = selectedSortClass ? classFareAmount(a, selectedSortClass) : trainFareAmount(a);
       const fareB = selectedSortClass ? classFareAmount(b, selectedSortClass) : trainFareAmount(b);
@@ -311,6 +316,13 @@ export function TrainResultsWorkspace() {
         return l1Name.includes(query) || l1No.includes(query) || l2Name.includes(query) || l2No.includes(query);
       });
     }
+    unverified = unverified.filter((split) => {
+      const l1Class = selectedSortClass || primaryClassCode(split.leg1);
+      const l2Class = selectedSortClass || primaryClassCode(split.leg2);
+      const avail1 = split.leg1?.classAvailability?.[l1Class]?.[0]?.text || split.leg1?.classAvailability?.[l1Class]?.[0]?.availabilityText || split.leg1?.availability;
+      const avail2 = split.leg2?.classAvailability?.[l2Class]?.[0]?.text || split.leg2?.classAvailability?.[l2Class]?.[0]?.availabilityText || split.leg2?.availability;
+      return !isUnavailableRailStatus(avail1) && !isUnavailableRailStatus(avail2);
+    });
     const sortedUnverified = [...unverified].sort((a, b) => {
       if (sortBy === "lowestLayover") return splitLayoverMinutes(a) - splitLayoverMinutes(b);
       if (sortBy === "fastest") return (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
@@ -328,7 +340,7 @@ export function TrainResultsWorkspace() {
         (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
     });
 
-    return [...verified, ...sortedUnverified].slice(0, 15);
+    return [...verified, ...sortedUnverified].slice(0, 10);
   }, [filteredSplits, state.splits, sortBy, selectedSortClass, searchQuery]);
 
   const filteredMultiSplits = useMemo(() => {
@@ -669,9 +681,12 @@ export function TrainResultsWorkspace() {
 
   function requestedLiveClasses(train: any, requestedClass: string) {
     const selected = String(requestedClass || "").toUpperCase();
-    if (selected && selected !== "ANY") return [selected];
-    const fallbackClass = selected && selected !== "ANY" ? selected : primaryClassCode(train);
-    return [fallbackClass].filter(Boolean);
+    const availableClasses = displayClassesForTrain(train);
+    if (!availableClasses.length) return selected && selected !== "ANY" ? [selected] : [primaryClassCode(train)].filter(Boolean);
+    if (!selected || selected === "ANY") return availableClasses;
+    // Move selected class to the front
+    const filtered = availableClasses.filter(c => c !== selected);
+    return [selected, ...filtered];
   }
 
 	  function uniqueLiveTargets(trains: any[], requestedClass: string, fallbackDate: string) {
