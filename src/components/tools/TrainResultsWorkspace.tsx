@@ -287,6 +287,7 @@ export function TrainResultsWorkspace() {
     const isExplicitlyUnbookable = (availText: string) => {
       if (!availText) return false;
       const status = availText.toUpperCase();
+      if (/PROVIDER|DATA UNAVAILABLE|RATE_LIMIT/i.test(status)) return false;
       return /NOT BOOKABLE|NOT RUNNING|CLASS NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|UNAVAILABLE/.test(status) && !/CHECK|TAP/.test(status);
     };
     unverified = unverified.filter((train) => {
@@ -324,6 +325,7 @@ export function TrainResultsWorkspace() {
     const isExplicitlyUnbookable = (availText: string) => {
       if (!availText) return false;
       const status = availText.toUpperCase();
+      if (/PROVIDER|DATA UNAVAILABLE|RATE_LIMIT/i.test(status)) return false;
       return /NOT BOOKABLE|NOT RUNNING|CLASS NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|UNAVAILABLE/.test(status) && !/CHECK|TAP/.test(status);
     };
     unverified = unverified.filter((split) => {
