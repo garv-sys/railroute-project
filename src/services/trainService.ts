@@ -332,16 +332,7 @@ function providerRunningDaysToMonFirst(value: unknown): boolean[] | undefined {
 }
 
 function trainRunsOnRailDate(runningDays: unknown, date: string) {
-  const text = String(runningDays || '');
-  if (!/^[01]{7}$/.test(text)) return true;
-  const jsDay = dateFromRailDate(date).getDay(); // 0 = Sunday ... 6 = Saturday
-  const monFirstIndex = jsDay === 0 ? 6 : jsDay - 1;
-  const sunFirstIndex = jsDay;
-
-  // The hosted provider currently returns Monday-first bits, while some legacy
-  // railway feeds expose Sunday-first bits. The train-between call is already
-  // date-specific, so only reject when both plausible indexes say "not running".
-  return text[monFirstIndex] === '1' || text[sunFirstIndex] === '1';
+  return true;
 }
 
 function providerClassesForTrain(train: any) {
