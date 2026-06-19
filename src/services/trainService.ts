@@ -177,6 +177,7 @@ type TrainSearchOptions = {
   plannerLegTimeoutMs?: number;
   globalTimeoutMs?: number;
   allowMixedClassSplits?: boolean;
+  minSplitResults?: number;
 };
 
 export interface SplitRouteResult {
@@ -958,6 +959,116 @@ function preLiveTrainScore(train: any, requestedSource: string, requestedDest: s
   return score;
 }
 
+function boundedScore(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function trainPopularityScore(train: any) {
+  const text = String(`${train?.train_no || train?.trainNo || ''} ${train?.train_name || train?.trainName || ''}`).toUpperCase();
+  if (/RAJDHANI|VANDE BHARAT|SHATABDI/.test(text)) return 100;
+  if (/DURONTO|TEJAS|S KRANTI|SAMPARK/.test(text)) return 88;
+  if (/SUPERFAST|\bSF\b|GARIB RATH/.test(text)) return 72;
+  if (/EXPRESS|MAIL/.test(text)) return 58;
+  if (/SPL|SPECIAL/.test(text)) return 38;
+  return 50;
+}
+
+function trainFrequencyScore(train: any) {
+  if (Array.isArray(train?.runsOnDays) && train.runsOnDays.length) {
+    const days = train.runsOnDays.filter(Boolean).length;
+    return boundedScore((days / 7) * 100);
+  }
+  const runningDays = String(train?.running_days || train?.runsOn || '');
+  if (/^[01]{7}$/.test(runningDays)) {
+    const days = runningDays.split('').filter((day) => day === '1').length;
+    return boundedScore((days / 7) * 100);
+  }
+  return 62;
+}
+
+function availabilityScoreFromText(status: unknown, lookupStatus?: LookupTrustStatus) {
+  const text = String(status || '').toUpperCase();
+  if (lookupStatus === 'VERIFIED') {
+    if (/\bAVAILABLE\b|\bAVL\b|CURR_AV|CNF|CONFIRM/.test(text) && !/WL|RAC|REGRET/.test(text)) return 100;
+    if (/RAC/.test(text)) return 72;
+    if (/WL|WAITLIST/.test(text)) return 48;
+    if (/REGRET|NOT AVAILABLE/.test(text)) return 12;
+  }
+  if (/\bAVAILABLE\b|\bAVL\b|CURR_AV|CNF|CONFIRM/.test(text) && !/WL|RAC|REGRET/.test(text)) return 84;
+  if (/RAC/.test(text)) return 64;
+  if (/WL|WAITLIST/.test(text)) return 42;
+  if (/REGRET|NOT AVAILABLE|NOT RUNNING|CANCEL|NO SERVICE/.test(text)) return 0;
+  if (/CHECK|NOT REQUESTED|UNAVAILABLE|NOT RETURNED/.test(text)) return 36;
+  return 50;
+}
+
+function travelTimeScore(durationMinutes: number, directDistanceKm = 0) {
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return 35;
+  const hours = durationMinutes / 60;
+  const expectedHours = directDistanceKm > 0 ? Math.max(2, directDistanceKm / 55) : 12;
+  const ratio = hours / expectedHours;
+  if (ratio <= 1.05) return 100;
+  if (ratio <= 1.25) return 86;
+  if (ratio <= 1.55) return 68;
+  if (ratio <= 2.1) return 46;
+  return 24;
+}
+
+function transferPolicyForHub(hub: string, preferredHub = '') {
+  const normalized = normalizeStationCode(hub);
+  const largeHub = LARGE_TRANSFER_HUBS.has(normalized) || isKnownMajorHub(normalized);
+  return {
+    minHours: largeHub ? 1.5 : 0.75,
+    idealMinHours: largeHub ? 2.0 : 1.25,
+    idealMaxHours: largeHub ? 5.5 : 3.5,
+    maxHours: normalized === preferredHub ? 18 : largeHub ? 14 : 8,
+  };
+}
+
+function transferQualityScore(hub: string, layoverHours: number, preferredHub = '') {
+  const policy = transferPolicyForHub(hub, preferredHub);
+  if (layoverHours < policy.minHours || layoverHours > policy.maxHours) return 0;
+  if (layoverHours >= policy.idealMinHours && layoverHours <= policy.idealMaxHours) return 100;
+  if (layoverHours < policy.idealMinHours) {
+    return boundedScore(65 + ((layoverHours - policy.minHours) / Math.max(0.1, policy.idealMinHours - policy.minHours)) * 25);
+  }
+  return boundedScore(95 - ((layoverHours - policy.idealMaxHours) / Math.max(0.1, policy.maxHours - policy.idealMaxHours)) * 55);
+}
+
+function directDistanceKmBetween(source: string, dest: string) {
+  const sourceCoord = stationCoordinatesForRouting(source);
+  const destCoord = stationCoordinatesForRouting(dest);
+  return sourceCoord && destCoord ? haversineKm(sourceCoord, destCoord) : 0;
+}
+
+function routeFeasibilityScore(hub: string, layoverHours: number, totalMinutes: number, source: string, dest: string, preferredHub = '') {
+  const transferScore = transferQualityScore(hub, layoverHours, preferredHub);
+  if (transferScore <= 0) return 0;
+  const distance = directDistanceKmBetween(source, dest);
+  const timeScore = travelTimeScore(totalMinutes, distance);
+  const hubScore = LARGE_TRANSFER_HUBS.has(normalizeStationCode(hub)) ? 94 : isKnownMajorHub(hub) ? 82 : 68;
+  return boundedScore((transferScore * 0.46) + (timeScore * 0.32) + (hubScore * 0.22));
+}
+
+function weightedRouteScore(params: {
+  feasibility: number;
+  availability: number;
+  travelTime: number;
+  frequency: number;
+  transfer: number;
+  popularity: number;
+}) {
+  return boundedScore(
+    params.feasibility * 0.35 +
+    params.availability * 0.20 +
+    params.travelTime * 0.15 +
+    params.frequency * 0.15 +
+    params.transfer * 0.10 +
+    params.popularity * 0.05
+  );
+}
+
 function dedupeTrainNumberVariants(trains: TrainResult[], requestedSource: string, requestedDest: string) {
   if (!shouldDedupeTrainNumberVariants(requestedSource, requestedDest)) return trains;
 
@@ -1051,18 +1162,31 @@ const MAJOR_HUB_LIST: MajorHub[] = Array.from(
 const MAJOR_HUB_BY_CODE = new Map(MAJOR_HUB_LIST.map((hub) => [hub.code, hub]));
 const NATIONAL_LONG_DISTANCE_SPLIT_HUBS = [
   // Eastern Corridor
-  'DDU', 'MGS', 'BSB', 'BSBS', 'PRYJ', 'GAYA', 'DHN', 'ASN', 'TATA', 'RNC', 'ROU', 'HWH', 'BBS',
+  'DDU', 'MGS', 'BSB', 'BSBS', 'PRYJ', 'GAYA', 'PNBE', 'DNR', 'DHN', 'ASN', 'KGP', 'TATA', 'RNC', 'ROU', 'HWH', 'BBS',
   // Central India
-  'CNB', 'LKO', 'LJN', 'NDLS', 'NZM', 'DLI', 'ANVT', 'DEE', 'AGC', 'JHS', 'VGLJ',
+  'CNB', 'LKO', 'LJN', 'NDLS', 'NZM', 'DLI', 'ANVT', 'DEE', 'AGC', 'JHS', 'VGLJ', 'JBP',
   // West & NW India
-  'JP', 'AII', 'KOTA', 'SWM', 'RTM', 'UJN', 'INDB', 'BPL', 'ET', 'JBP', 'KTE', 'ABR', 'BRC', 'ADI',
+  'JP', 'AII', 'KOTA', 'SWM', 'RTM', 'UJN', 'INDB', 'BPL', 'ET', 'KTE', 'ABR', 'BRC', 'ADI', 'ST', 'CSMT', 'LTT', 'BCT', 'BDTS',
   // South & Central
-  'NGP', 'BZA', 'VSKP', 'MAS', 'SC', 'HYB', 'KCG', 'SBC', 'YPR',
+  'NGP', 'BZA', 'VSKP', 'MAS', 'MS', 'SC', 'HYB', 'KCG', 'SBC', 'YPR', 'SMVB',
   // Jharkhand/Chhattisgarh
-  'R', 'BSP', 'DURG', 'NED', 'WL',
+  'R', 'BSP', 'DURG', 'NED', 'WL', 'BBS',
   // Bihar/UP extras
   'MFP', 'SPJ', 'SHC', 'GKP', 'GD',
 ];
+
+const CORE_INTERCHANGE_HUBS = [
+  'NDLS', 'DLI', 'ANVT', 'NZM', 'CNB', 'PRYJ', 'DDU', 'MGS', 'PNBE', 'GAYA',
+  'LKO', 'LJN', 'BSB', 'BSBS', 'JP', 'KOTA', 'ADI', 'ST', 'CSMT', 'LTT',
+  'NGP', 'ET', 'BPL', 'JBP', 'BZA', 'SC', 'MAS', 'SBC', 'YPR', 'HWH',
+  'KGP', 'TATA', 'ROU', 'BSP', 'R', 'BBS',
+];
+
+const LARGE_TRANSFER_HUBS = new Set([
+  ...CORE_INTERCHANGE_HUBS,
+  'AII', 'AGC', 'MTJ', 'JHS', 'VGLJ', 'KTE', 'RTM', 'UJN', 'BRC', 'BCT', 'BDTS',
+  'HYB', 'KCG', 'SMVB', 'MS', 'DNR', 'RNC', 'DHN', 'ASN', 'VSKP', 'DURG',
+]);
 
 const RAJASTHAN_SPLIT_DESTINATIONS = new Set(['JP', 'GADJ', 'AII', 'AWR', 'JU', 'UDZ', 'BHL', 'KOTA', 'SWM', 'ABR', 'BKN', 'BGKT']);
 const CKP_RAJASTHAN_PRIORITY_HUBS = [
@@ -1160,6 +1284,7 @@ export function isHubOnPath(source: { lat: number; lon: number }, hub: { lat: nu
 }
 
 const USER_PRIORITY_HUBS = new Set([
+  ...CORE_INTERCHANGE_HUBS,
   'DDU', 'MGS',
   'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE', 'DEC', 'GGN',
   'PRYJ', 'ALD', 'PRRB', 'PCOI', 'SFG',
@@ -1171,6 +1296,7 @@ const USER_PRIORITY_HUBS = new Set([
 ]);
 
 const STRATEGIC_SPLIT_HUBS = [
+  ...CORE_INTERCHANGE_HUBS,
   'DDU', 'MGS', 'BSB', 'BSBS', 'PRYJ', 'ALD',
   'CNB', 'LKO', 'LJN',
   'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE',
@@ -1182,16 +1308,18 @@ const DELHI_SPLIT_HUBS = ['NDLS', 'DLI', 'NZM', 'ANVT'];
 
 const HUB_IMPORTANCE: Record<string, number> = {
   NDLS: 100, DLI: 96, NZM: 94, ANVT: 88, DEE: 82,
-  CNB: 96, PRYJ: 95, ALD: 90, DDU: 94, MGS: 88, BSB: 86, BSBS: 78,
-  LKO: 90, LJN: 82, AGC: 84, TDL: 82, MTJ: 78,
+  CNB: 96, PRYJ: 95, ALD: 90, DDU: 94, MGS: 88, PNBE: 90, GAYA: 82, BSB: 86, BSBS: 78,
+  LKO: 90, LJN: 82, AGC: 84, TDL: 82, MTJ: 78, KGP: 88, HWH: 96, TATA: 82, ROU: 78, BSP: 82, R: 78, BBS: 84,
   KOTA: 92, SWM: 82, JP: 88, GADJ: 72, FL: 76, AII: 84, AWR: 78, JU: 82, UDZ: 80, BHL: 74, RTM: 78, UJN: 78, APR: 72,
+  ADI: 90, ST: 86, CSMT: 92, LTT: 88, NGP: 90, ET: 88, BPL: 84, JBP: 82, BZA: 90, SC: 90, MAS: 90, SBC: 88, YPR: 84,
 };
 
 const HUB_TRAIN_DENSITY: Record<string, number> = {
   NDLS: 100, DLI: 94, NZM: 92, ANVT: 86, DEE: 80,
-  CNB: 96, PRYJ: 94, ALD: 88, DDU: 92, MGS: 86, BSB: 84, BSBS: 76,
-  LKO: 90, LJN: 80, AGC: 84, TDL: 82, MTJ: 76,
+  CNB: 96, PRYJ: 94, ALD: 88, DDU: 92, MGS: 86, PNBE: 88, GAYA: 82, BSB: 84, BSBS: 76,
+  LKO: 90, LJN: 80, AGC: 84, TDL: 82, MTJ: 76, KGP: 88, HWH: 96, TATA: 82, ROU: 78, BSP: 82, R: 78, BBS: 84,
   KOTA: 90, SWM: 78, JP: 86, GADJ: 70, FL: 76, AII: 82, AWR: 72, JU: 78, UDZ: 76, BHL: 70, RTM: 78, UJN: 76, APR: 68,
+  ADI: 88, ST: 84, CSMT: 90, LTT: 88, NGP: 90, ET: 88, BPL: 84, JBP: 82, BZA: 90, SC: 90, MAS: 90, SBC: 88, YPR: 84,
 };
 
 function hubDisplayName(code: string) {
@@ -2237,13 +2365,6 @@ export async function checkDirectTrains(source: string, dest: string, date: stri
       return hours * 60 + mins;
     };
 
-    // ── COMPOSITE VALUE SCORE ───────────────────────────────────────────────
-    // Primary: FARE (cheapest first) — weighted 70%
-    // Secondary: AVAILABILITY (confirmed > RAC > WL) — weighted 20%
-    // Tertiary: DURATION (shorter trip = better) — weighted 10%
-    //
-    // We normalise all three dimensions, then combine into one score.
-    // Lower composite = better rank.
     const fares    = validEnrichedTrains.map(extractFare);
     const durations = validEnrichedTrains.map(t => getDurationMins(t.duration));
     const realFares = fares.filter(f => f < 999999);
@@ -2256,38 +2377,55 @@ export async function checkDirectTrains(source: string, dest: string, date: stri
     const normalise = (val: number, min: number, max: number) =>
       max === min ? 0 : (val - min) / (max - min);
 
+    const directDistanceKm = directDistanceKmBetween(source, dest);
     validEnrichedTrains.sort((a, b) => {
       const fareA  = extractFare(a);
       const fareB  = extractFare(b);
-      const availA = getAvailScore(a.availability);
-      const availB = getAvailScore(b.availability);
       const durA   = getDurationMins(a.duration);
       const durB   = getDurationMins(b.duration);
       const hasProviderA = hasReturnedAvailability(a.availability) || fareA < 999999;
       const hasProviderB = hasReturnedAvailability(b.availability) || fareB < 999999;
-      if (hasProviderA !== hasProviderB) return hasProviderA ? -1 : 1;
 
-      // Normalised 0–1 (lower is better for all three)
       const normFareA  = normalise(fareA,  minFare, maxFare);
       const normFareB  = normalise(fareB,  minFare, maxFare);
-      const normAvailA = (availA - 1) / 4; // 0 = confirmed, 1 = regret
-      const normAvailB = (availB - 1) / 4;
-      const normDurA   = normalise(durA, minDur, maxDur);
-      const normDurB   = normalise(durB, minDur, maxDur);
-
-      const scoreA = normFareA * 0.70 + normAvailA * 0.20 + normDurA * 0.10;
-      const scoreB = normFareB * 0.70 + normAvailB * 0.20 + normDurB * 0.10;
+      const fareValueA = fareA < 999999 ? boundedScore(100 - normFareA * 32) : 48;
+      const fareValueB = fareB < 999999 ? boundedScore(100 - normFareB * 32) : 48;
+      const feasibilityA = boundedScore((trainMatchesRequestedLeg(a, source, dest) ? 78 : 58) + (hasProviderA ? 12 : 0) + (fareA < 999999 ? 5 : 0));
+      const feasibilityB = boundedScore((trainMatchesRequestedLeg(b, source, dest) ? 78 : 58) + (hasProviderB ? 12 : 0) + (fareB < 999999 ? 5 : 0));
+      const scoreA = weightedRouteScore({
+        feasibility: feasibilityA,
+        availability: availabilityScoreFromText(a.availability, a.availabilityStatus),
+        travelTime: travelTimeScore(durA, directDistanceKm),
+        frequency: trainFrequencyScore(a),
+        transfer: 100,
+        popularity: Math.max(trainPopularityScore(a), fareValueA),
+      });
+      const scoreB = weightedRouteScore({
+        feasibility: feasibilityB,
+        availability: availabilityScoreFromText(b.availability, b.availabilityStatus),
+        travelTime: travelTimeScore(durB, directDistanceKm),
+        frequency: trainFrequencyScore(b),
+        transfer: 100,
+        popularity: Math.max(trainPopularityScore(b), fareValueB),
+      });
       if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB)) {
         return durA - durB;
       }
 
-      return scoreA - scoreB; // ascending: cheapest+confirmed+fastest first
+      return scoreB - scoreA || durA - durB || fareA - fareB;
     });
 
-    // Attach rank metadata so the UI can render price-rank badges
 	    validEnrichedTrains.forEach((t, i) => {
 	      (t as any)._priceRank = i + 1;
 	      (t as any)._totalCount = validEnrichedTrains.length;
+	      (t as any).confidenceScore = weightedRouteScore({
+	        feasibility: boundedScore((trainMatchesRequestedLeg(t, source, dest) ? 78 : 58) + (hasReturnedAvailability(t.availability) ? 12 : 0) + (extractFare(t) < 999999 ? 5 : 0)),
+	        availability: availabilityScoreFromText(t.availability, t.availabilityStatus),
+	        travelTime: travelTimeScore(getDurationMins(t.duration), directDistanceKm),
+	        frequency: trainFrequencyScore(t),
+	        transfer: 100,
+	        popularity: trainPopularityScore(t),
+	      });
 	    });
 
 
@@ -2404,14 +2542,15 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 
   const preferredHub = normalizeStationCode(preferredHubInput);
   const hasPreferredHub = Boolean(preferredHub && preferredHub !== source && preferredHub !== dest);
-  const splitHubLimit = quickLimit(options, options.maxSplitHubs, hasPreferredHub ? 35 : 30);
-  const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 40);
-  const splitCandidateLimit = quickLimit(options, options.maxSplitCandidates, 250);
+  const splitHubLimit = quickLimit(options, options.maxSplitHubs, hasPreferredHub ? 44 : 38);
+  const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 48);
+  const splitCandidateLimit = quickLimit(options, options.maxSplitCandidates, 420);
   const splitResultLimit = quickLimit(options, options.maxSplitResults, isFullCoverage(options) ? 120 : 15);
+  const minSplitResults = Math.min(splitResultLimit, Math.max(5, options.minSplitResults || 5));
   const allowMixedClassSplits = Boolean(options.allowMixedClassSplits);
   const quickPotentialLimit = isFullCoverage(options)
     ? splitCandidateLimit
-    : Math.min(splitCandidateLimit, Math.max(40, splitResultLimit));
+    : Math.min(splitCandidateLimit, Math.max(140, splitResultLimit * 12));
   const legSearchOptions: TrainSearchOptions = {
     ...options,
     providerPairLimit: 1,
@@ -2460,7 +2599,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     const enoughQuickPotential = () => {
       if (isFullCoverage(options)) return false;
       const uniqueHubs = new Set(potentialRoutes.map((route) => route.hub)).size;
-      return potentialRoutes.length >= Math.min(100, quickPotentialLimit) && uniqueHubs >= 8;
+      return potentialRoutes.length >= Math.min(180, quickPotentialLimit) && uniqueHubs >= 12;
     };
 
     // Check hubs in bounded parallel batches. Train-list calls are cached and
@@ -2575,16 +2714,22 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	                // Heritage/mountain routes (short leg 2) can have longer layovers at a hub
 	                const isHeritageLeg2 = !!(t2._isHeritage);
 	                const isMajorHub = isKnownMajorHub(hub);
-	                const maxLayover = hub === preferredHub
-	                  ? 18.0
-	                  : isMajorHub
-	                    ? 12.0
-	                    : isHeritageLeg2
-	                      ? 8.0
-	                      : 6.0;
+                const transferPolicy = transferPolicyForHub(hub, preferredHub);
+                const maxLayover = isHeritageLeg2 ? Math.max(transferPolicy.maxHours, 8) : transferPolicy.maxHours;
 
-                // LAYOVER WINDOW: 1h to maxLayover for optimal transition
-                if (layoverHours >= 0.75 && layoverHours <= maxLayover) {
+                if (layoverHours >= transferPolicy.minHours && layoverHours <= maxLayover) {
+                  const leg1Mins = parseDurationMins(String(t1.travel_time || t1.duration || ''));
+                  const leg2Mins = parseDurationMins(String(t2.travel_time || t2.duration || ''));
+                  const totalMinutes = leg1Mins + leg2Mins + Math.round(layoverHours * 60);
+                  const transferScore = transferQualityScore(hub, layoverHours, preferredHub);
+                  const preliminaryScore = weightedRouteScore({
+                    feasibility: routeFeasibilityScore(hub, layoverHours, totalMinutes, source, dest, preferredHub),
+                    availability: 50,
+                    travelTime: travelTimeScore(totalMinutes, directDistanceKmBetween(source, dest)),
+                    frequency: Math.round((trainFrequencyScore(t1) + trainFrequencyScore(t2)) / 2),
+                    transfer: transferScore,
+                    popularity: Math.round((trainPopularityScore(t1) + trainPopularityScore(t2)) / 2),
+                  });
                   potentialRoutes.push({
                     hub,
 	                    t1,
@@ -2596,7 +2741,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	                    leg2DepartureDate: railDateToIso(resolvedLeg2Date),
 	                    layoverHours,
 	                    layoverDuration: formatDuration(depMs - arrivalMs),
-	                    score: 100 - (layoverHours * 4) + (hub === preferredHub ? 45 : 0) + (isMajorHub ? 10 : 0) + trainServiceQualityBoost(t1) + trainServiceQualityBoost(t2),
+	                    score: preliminaryScore + (hub === preferredHub ? 8 : 0) + (isMajorHub ? 3 : 0),
 	                    _isHeritage: isHeritageLeg2
                   });
                   routesForHub++;
@@ -2621,6 +2766,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     potentialRoutes = takeForCoverage(potentialRoutes, splitCandidateLimit);
 
     const validRoutes: SplitRouteResult[] = [];
+    const directDistanceKm = directDistanceKmBetween(source, dest);
     
     const parseDurationMins = (dur: string) => {
       if (!dur || dur === 'N/A') return 0;
@@ -2784,9 +2930,21 @@ export async function findSmartRoutes(source: string, dest: string, date: string
             ? Math.round((predictionValues[0] * predictionValues[1]) / 100)
             : null;
 
-          let optimizedScore = 100;
-          optimizedScore += getSeatScore(leg1Verified.availability);
-          optimizedScore += getSeatScore(leg2Verified.availability);
+          const leg1Mins = parseDurationMins(leg1Verified.duration);
+          const leg2Mins = parseDurationMins(leg2Verified.duration);
+          const totalHours = (leg1Mins + leg2Mins) / 60 + route.layoverHours;
+          const totalMinutes = Math.round(totalHours * 60);
+          const transferScore = transferQualityScore(route.hub, route.layoverHours, preferredHub);
+          if (transferScore <= 0) return null;
+          let optimizedScore = weightedRouteScore({
+            feasibility: routeFeasibilityScore(route.hub, route.layoverHours, totalMinutes, source, dest, preferredHub),
+            availability: Math.round((availabilityScoreFromText(leg1Verified.availability, leg1Verified.availabilityStatus) + availabilityScoreFromText(leg2Verified.availability, leg2Verified.availabilityStatus)) / 2),
+            travelTime: travelTimeScore(totalMinutes, directDistanceKm),
+            frequency: Math.round((trainFrequencyScore(leg1Verified) + trainFrequencyScore(leg2Verified)) / 2),
+            transfer: transferScore,
+            popularity: Math.round((trainPopularityScore(leg1Verified) + trainPopularityScore(leg2Verified)) / 2),
+          });
+          optimizedScore += Math.round((getSeatScore(leg1Verified.availability) + getSeatScore(leg2Verified.availability)) / 12);
           if (selectedClassUnavailable) {
             optimizedScore -= 25;
           }
@@ -2795,18 +2953,9 @@ export async function findSmartRoutes(source: string, dest: string, date: string
           if (isMajorHub) {
             optimizedScore += 10;
           }
-          if (route.layoverHours > 3) {
-            optimizedScore -= (route.layoverHours - 3) * (isMajorHub ? 8 : 15);
-          } else if (route.layoverHours < 1.5) {
-            optimizedScore -= (1.5 - route.layoverHours) * 10;
-          } else {
-            optimizedScore += 5;
+          if (validRoutes.length < minSplitResults && transferScore >= 80) {
+            optimizedScore += 3;
           }
-
-          const leg1Mins = parseDurationMins(leg1Verified.duration);
-          const leg2Mins = parseDurationMins(leg2Verified.duration);
-          const totalHours = (leg1Mins + leg2Mins) / 60 + route.layoverHours;
-          optimizedScore -= totalHours * 1.2;
 
           optimizedScore = Math.max(0, Math.min(100, Math.round(optimizedScore)));
 
@@ -2977,9 +3126,9 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
   dest = normalizeStationCode(dest);
   const preferredHub = normalizeStationCode(preferredHubInput);
   const hasPreferredHub = Boolean(preferredHub && preferredHub !== source && preferredHub !== dest);
-  const multiPlanLimit = quickLimit(options, options.maxMultiPlans, hasPreferredHub ? 18 : 10);
-  const multiLegLimit = quickLimit(options, options.maxMultiLegOptions, 5);
-  const multiCandidateLimit = quickLimit(options, options.maxMultiCandidates, 72);
+  const multiPlanLimit = quickLimit(options, options.maxMultiPlans, hasPreferredHub ? 22 : 16);
+  const multiLegLimit = quickLimit(options, options.maxMultiLegOptions, 6);
+  const multiCandidateLimit = quickLimit(options, options.maxMultiCandidates, 120);
   const multiResultLimit = quickLimit(options, options.maxMultiResults, 12);
   const legSearchOptions: TrainSearchOptions = {
     ...options,
@@ -3059,7 +3208,9 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
               const layover1 = (dep2 - arr1) / (1000 * 60 * 60);
               const layover2 = (dep3 - arr2) / (1000 * 60 * 60);
 
-              if (layover1 < 0.75 || layover2 < 0.75 || layover1 > 7 || layover2 > 7) continue;
+              const policy1 = transferPolicyForHub(plan.h1, preferredHub);
+              const policy2 = transferPolicyForHub(plan.h2, preferredHub);
+              if (layover1 < policy1.minHours || layover2 < policy2.minHours || layover1 > policy1.maxHours || layover2 > policy2.maxHours) continue;
 
               potentialRoutes.push({
                 trains: [t1, t2, t3],
@@ -3116,6 +3267,17 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
           : null;
         const totalMinutes = legs.reduce((sum, leg) => sum + parseDurationMins(leg.duration), 0) + Math.round((route.layoverHours[0] + route.layoverHours[1]) * 60);
 
+        const transferScores = route.hubs.map((hub: string, index: number) => transferQualityScore(hub, route.layoverHours[index], preferredHub));
+        const totalDurationScore = travelTimeScore(totalMinutes, directDistanceKmBetween(source, dest));
+        const weightedScore = weightedRouteScore({
+          feasibility: boundedScore((transferScores.reduce((sum: number, score: number) => sum + score, 0) / transferScores.length) * 0.58 + totalDurationScore * 0.42),
+          availability: Math.round(legs.reduce((sum, leg) => sum + availabilityScoreFromText(leg.availability, leg.availabilityStatus), 0) / legs.length),
+          travelTime: totalDurationScore,
+          frequency: Math.round(legs.reduce((sum, leg) => sum + trainFrequencyScore(leg), 0) / legs.length),
+          transfer: Math.round(transferScores.reduce((sum: number, score: number) => sum + score, 0) / transferScores.length),
+          popularity: Math.round(legs.reduce((sum, leg) => sum + trainPopularityScore(leg), 0) / legs.length),
+        });
+
         results.push({
           legs,
           interchangeStations: route.hubs,
@@ -3127,7 +3289,7 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
           })),
           totalFare,
           totalDuration: formatDurationMinutes(totalMinutes),
-          score: scoreMultiSplitRoute(legs, route.layoverHours) - (selectedClassUnavailable ? 25 : 0),
+          score: Math.max(scoreMultiSplitRoute(legs, route.layoverHours), weightedScore) - (selectedClassUnavailable ? 25 : 0),
           combinedConfirmationChance,
         });
       } catch (error) {

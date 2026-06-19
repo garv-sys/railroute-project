@@ -57,31 +57,32 @@ export async function POST(request: Request) {
       coverageMode,
       exactStationOnly: false,
       providerPairLimit: 1,
-      maxSplitHubs: ckpRajasthanRequest ? 26 : 10,
-      maxSplitLegOptions: ckpRajasthanRequest ? 24 : 16,
-      maxSplitCandidates: ckpRajasthanRequest ? 260 : 180,
+      maxSplitHubs: ckpRajasthanRequest ? 38 : 32,
+      maxSplitLegOptions: ckpRajasthanRequest ? 36 : 28,
+      maxSplitCandidates: ckpRajasthanRequest ? 420 : 360,
       maxSplitResults: ckpRajasthanRequest ? 28 : 15,
+      minSplitResults: 5,
       maxMultiPlans: 0,
       maxMultiLegOptions: 0,
       maxMultiCandidates: 0,
       maxMultiResults: 0,
-      plannerLegTimeoutMs: 3200,
-      globalTimeoutMs: ckpRajasthanRequest ? 11500 : 8500,
+      plannerLegTimeoutMs: ckpRajasthanRequest ? 4200 : 3800,
+      globalTimeoutMs: ckpRajasthanRequest ? 15000 : 12500,
       allowMixedClassSplits: true,
     } as const;
 
     const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);
-    const multiSplitRoutes = splitRoutes.length >= 20
+    const multiSplitRoutes = splitRoutes.length >= 15
       ? []
       : await withTimeout(
         findMultiSplitRoutes(source, destination, date, classType, preferredHub, {
           ...plannerOptions,
-          maxMultiPlans: ckpRajasthanRequest ? 14 : 10,
-          maxMultiLegOptions: 4,
-          maxMultiCandidates: ckpRajasthanRequest ? 120 : 80,
-          maxMultiResults: ckpRajasthanRequest ? 18 : 16,
+          maxMultiPlans: ckpRajasthanRequest ? 18 : 14,
+          maxMultiLegOptions: 5,
+          maxMultiCandidates: ckpRajasthanRequest ? 150 : 120,
+          maxMultiResults: ckpRajasthanRequest ? 18 : 12,
         }),
-        ckpRajasthanRequest ? 4_500 : 3_000,
+        ckpRajasthanRequest ? 6_000 : 4_500,
         []
       );
     const routeRecommendation = localRecommendation(directTrains, splitRoutes, multiSplitRoutes, budget);

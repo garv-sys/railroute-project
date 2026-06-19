@@ -1240,8 +1240,8 @@ export function TrainResultsWorkspace() {
             ) : visibleTrains.length > 0 ? (
               <>
                  <div className="mb-4 text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
-                  {visibleTrains.length > 10
-                    ? `Showing top 10 of ${visibleTrains.length} direct trains found`
+                  {visibleTrains.length > 15
+                    ? `Showing top 15 of ${visibleTrains.length} direct trains found`
                     : `${visibleTrains.length} direct ${visibleTrains.length === 1 ? "train" : "trains"} found`
                   }
                 </div>
@@ -1249,7 +1249,7 @@ export function TrainResultsWorkspace() {
                   <BestDirectOptionPanel train={visibleTrains[0]} />
                 )}
                 <div className="space-y-4">
-                  {visibleTrains.slice(0, 10).map((train) => (
+                  {visibleTrains.slice(0, 15).map((train) => (
                     <PremiumTrainCard
                       key={`${train.trainNo}-${train.source}-${train.destination}`}
                       train={train}
