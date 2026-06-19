@@ -1,7 +1,7 @@
 import { searchDirectTrains, checkSeatAvailability, getTrainSchedule } from './irctcService';
 import MAJOR_HUBS from '@/data/major_hubs.json';
 import { buildTrustMeta } from '@/lib/confidence';
-import { STATION_COORDS } from '@/lib/railway-intelligence';
+import { STATION_COORDS, stationLabelFromCode } from '@/lib/railway-intelligence';
 import {
   availabilityReasonForStatus,
   fareReasonForStatus,
@@ -176,6 +176,7 @@ type TrainSearchOptions = {
   maxMultiResults?: number;
   plannerLegTimeoutMs?: number;
   globalTimeoutMs?: number;
+  allowMixedClassSplits?: boolean;
 };
 
 export interface SplitRouteResult {
@@ -207,6 +208,22 @@ export interface MultiSplitRouteResult {
   totalDuration: string;
   score: number;
   combinedConfirmationChance?: number | null;
+}
+
+export interface GodModeHubCandidate {
+  code: string;
+  name: string;
+  rank: number;
+  score: number;
+  confidence: number;
+  importance: number;
+  trainDensity: number;
+  connectivity: number;
+  geographicRelevance: number;
+  progress: number;
+  distanceFromSourceKm: number;
+  distanceToDestinationKm: number;
+  reasons: string[];
 }
 
 function parseTime(timeStr: string, baseDate: string) {
@@ -1132,8 +1149,123 @@ const USER_PRIORITY_HUBS = new Set([
   'LKO', 'LJN',
   'CNB',
   'BSB', 'BSBS',
-  'JP', 'KOTA', 'AII'
+  'AGC', 'TDL', 'MTJ',
+  'KOTA', 'SWM', 'JP', 'GADJ', 'FL', 'AII'
 ]);
+
+const STRATEGIC_SPLIT_HUBS = [
+  'DDU', 'MGS', 'BSB', 'BSBS', 'PRYJ', 'ALD',
+  'CNB', 'LKO', 'LJN',
+  'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE',
+  'TDL', 'AGC', 'MTJ',
+  'KOTA', 'SWM', 'JP', 'GADJ', 'FL', 'AII',
+];
+
+const HUB_IMPORTANCE: Record<string, number> = {
+  NDLS: 100, DLI: 96, NZM: 94, ANVT: 88, DEE: 82,
+  CNB: 96, PRYJ: 95, ALD: 90, DDU: 94, MGS: 88, BSB: 86, BSBS: 78,
+  LKO: 90, LJN: 82, AGC: 84, TDL: 82, MTJ: 78,
+  KOTA: 92, SWM: 82, JP: 88, GADJ: 72, FL: 76, AII: 84,
+};
+
+const HUB_TRAIN_DENSITY: Record<string, number> = {
+  NDLS: 100, DLI: 94, NZM: 92, ANVT: 86, DEE: 80,
+  CNB: 96, PRYJ: 94, ALD: 88, DDU: 92, MGS: 86, BSB: 84, BSBS: 76,
+  LKO: 90, LJN: 80, AGC: 84, TDL: 82, MTJ: 76,
+  KOTA: 90, SWM: 78, JP: 86, GADJ: 70, FL: 76, AII: 82,
+};
+
+function hubDisplayName(code: string) {
+  const normalized = normalizeStationCode(code);
+  const hub = MAJOR_HUB_BY_CODE.get(normalized);
+  if (hub) return `${hub.name} (${hub.code})`;
+  return stationLabelFromCode(normalized);
+}
+
+function scoredHubCandidate(sourceCoord: { lat: number; lon: number }, destCoord: { lat: number; lon: number }, code: string) {
+  const normalized = normalizeStationCode(code);
+  const coord = stationCoordinatesForRouting(normalized);
+  if (!coord) return null;
+
+  const directDistance = Math.max(1, haversineKm(sourceCoord, destCoord));
+  const sourceDistance = haversineKm(sourceCoord, coord);
+  const destDistance = haversineKm(coord, destCoord);
+  const progress = hubRouteProgress(sourceCoord, destCoord, coord);
+  const detourRatio = (sourceDistance + destDistance) / directDistance;
+  const corridorPenalty = Math.min(1, Math.abs(Math.max(0, Math.min(1, progress)) - progress) * 1.4);
+  const geographicRelevance = Math.max(0, Math.min(100, 125 - (detourRatio - 1) * 95 - corridorPenalty * 45 - Math.abs(progress - 0.5) * 18));
+  const importance = HUB_IMPORTANCE[normalized] ?? (USER_PRIORITY_HUBS.has(normalized) ? 74 : 58);
+  const trainDensity = HUB_TRAIN_DENSITY[normalized] ?? (isKnownMajorHub(normalized) ? 68 : 48);
+  const connectivity = Math.max(0, Math.min(100, (importance * 0.58) + (trainDensity * 0.42)));
+  const score = Math.round((geographicRelevance * 0.44) + (importance * 0.24) + (trainDensity * 0.2) + (connectivity * 0.12));
+  const reasons = [
+    importance >= 85 ? 'major interchange' : 'usable interchange',
+    trainDensity >= 85 ? 'high train density' : 'corridor coverage',
+    geographicRelevance >= 76 ? 'strong route geometry' : 'strategic detour',
+  ];
+
+  return {
+    code: normalized,
+    name: hubDisplayName(normalized),
+    score,
+    confidence: Math.max(40, Math.min(99, score)),
+    importance,
+    trainDensity,
+    connectivity: Math.round(connectivity),
+    geographicRelevance: Math.round(geographicRelevance),
+    progress: Number(Math.max(0, Math.min(1, progress)).toFixed(2)),
+    distanceFromSourceKm: Math.round(sourceDistance),
+    distanceToDestinationKm: Math.round(destDistance),
+    reasons,
+  };
+}
+
+export function godModeHubCandidates(source: string, dest: string, preferredHub = '', limit = 8): GodModeHubCandidate[] {
+  const normalizedSource = normalizeStationCode(source);
+  const normalizedDest = normalizeStationCode(dest);
+  const sourceCoord = stationCoordinatesForRouting(normalizedSource);
+  const destCoord = stationCoordinatesForRouting(normalizedDest);
+  const preferred = normalizeStationCode(preferredHub);
+  const excluded = new Set([normalizedSource, normalizedDest]);
+
+  if (!sourceCoord || !destCoord) {
+    return Array.from(new Set([preferred, ...STRATEGIC_SPLIT_HUBS, ...dynamicSplitHubCandidates(source, dest, preferredHub, limit * 2)].filter(Boolean)))
+      .filter((code) => !excluded.has(code))
+      .slice(0, limit)
+      .map((code, index) => ({
+        code,
+        name: hubDisplayName(code),
+        rank: index + 1,
+        score: Math.max(50, 95 - index * 5),
+        confidence: Math.max(50, 95 - index * 5),
+        importance: HUB_IMPORTANCE[code] ?? 60,
+        trainDensity: HUB_TRAIN_DENSITY[code] ?? 55,
+        connectivity: HUB_IMPORTANCE[code] ?? 60,
+        geographicRelevance: 50,
+        progress: 0.5,
+        distanceFromSourceKm: 0,
+        distanceToDestinationKm: 0,
+        reasons: ['strategic fallback'],
+      }));
+  }
+
+  const dynamic = dynamicSplitHubCandidates(source, dest, preferredHub, 18);
+  const pool = Array.from(new Set([preferred, ...STRATEGIC_SPLIT_HUBS, ...dynamic].filter(Boolean)))
+    .filter((code) => !excluded.has(code));
+  const scored = Array.from(new Map(pool
+    .map((code) => scoredHubCandidate(sourceCoord, destCoord, code))
+    .filter((candidate): candidate is Omit<GodModeHubCandidate, 'rank'> => Boolean(candidate))
+    .map((candidate) => [candidate.code, candidate] as const)
+  ).values())
+    .sort((a, b) => {
+      if (preferred && a.code === preferred) return -1;
+      if (preferred && b.code === preferred) return 1;
+      return b.score - a.score;
+    })
+    .slice(0, Math.max(5, Math.min(8, limit)));
+
+  return scored.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+}
 
 export function dynamicSplitHubCandidates(source: string, dest: string, preferredHub = '', limit = Number.POSITIVE_INFINITY) {
   const normalizedSource = normalizeStationCode(source);
@@ -1189,9 +1321,10 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     ? NATIONAL_LONG_DISTANCE_SPLIT_HUBS.filter((hub) => !excluded.has(hub))
     : [];
   
-  const candidates = Array.from(new Set([preferred, ...nearbySourceHubs, ...nearbyDestHubs, ...longDistancePriorityHubs, ...sorted.map((hub) => hub.code)].filter(Boolean)));
+  const candidates = Array.from(new Set([preferred, ...nearbySourceHubs, ...nearbyDestHubs, ...STRATEGIC_SPLIT_HUBS, ...longDistancePriorityHubs, ...sorted.map((hub) => hub.code)].filter(Boolean)));
   const filteredCandidates = candidates.filter((hubCode) => {
     if (hubCode === preferred) return true;
+    if (USER_PRIORITY_HUBS.has(hubCode)) return true;
     if (nearbySourceHubs.includes(hubCode)) return true;
     if (nearbyDestHubs.includes(hubCode)) return true;
     const hubCoord = stationCoordinatesForRouting(hubCode);
@@ -2214,6 +2347,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
   const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 40);
   const splitCandidateLimit = quickLimit(options, options.maxSplitCandidates, 250);
   const splitResultLimit = quickLimit(options, options.maxSplitResults, isFullCoverage(options) ? 120 : 15);
+  const allowMixedClassSplits = Boolean(options.allowMixedClassSplits);
   const quickPotentialLimit = isFullCoverage(options)
     ? splitCandidateLimit
     : Math.min(splitCandidateLimit, Math.max(40, splitResultLimit));
@@ -2358,7 +2492,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
                 if (destCode1.toUpperCase() !== srcCode2.toUpperCase()) continue;
 
                   const requestedSplitClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
-                  if (requestedSplitClass) {
+                  if (requestedSplitClass && !allowMixedClassSplits) {
                     if (!legSupportsRequestedClass(t1, requestedSplitClass) || !legSupportsRequestedClass(t2, requestedSplitClass)) {
                       continue;
                     }
@@ -2537,22 +2671,22 @@ export async function findSmartRoutes(source: string, dest: string, date: string
             enrichWithLiveAvailability(
               { ...route.t1, _journeyDate: leg1Date },
               leg1Date,
-              classType,
+              allowMixedClassSplits ? 'Any' : classType,
               legOptions
             ),
             enrichWithLiveAvailability(
               { ...route.t2, _journeyDate: leg2Date },
               leg2Date,
-              classType,
+              allowMixedClassSplits ? 'Any' : classType,
               legOptions
             )
           ]);
           
           const cleanClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
-          const hasTargetLeg1 = cleanClass 
+          const hasTargetLeg1 = cleanClass && !allowMixedClassSplits
             ? verifiedLiveClassEntries(leg1Enriched).some(([cls]) => cls === cleanClass)
             : hasVerifiedLiveClass(leg1Enriched);
-          const hasTargetLeg2 = cleanClass 
+          const hasTargetLeg2 = cleanClass && !allowMixedClassSplits
             ? verifiedLiveClassEntries(leg2Enriched).some(([cls]) => cls === cleanClass)
             : hasVerifiedLiveClass(leg2Enriched);
 
@@ -2575,8 +2709,9 @@ export async function findSmartRoutes(source: string, dest: string, date: string
           ) {
             return null;
           }
-          const selectedClassUnavailable =
-            selectedClassMissing(leg1Verified, classType) || selectedClassMissing(leg2Verified, classType);
+          const selectedClassUnavailable = !allowMixedClassSplits && (
+            selectedClassMissing(leg1Verified, classType) || selectedClassMissing(leg2Verified, classType)
+          );
 
           const f1 = safeParseFare(leg1Verified.fare);
           const f2 = safeParseFare(leg2Verified.fare);

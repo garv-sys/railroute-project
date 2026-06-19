@@ -21,10 +21,7 @@ import {
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { softPanel, productBg } from "@/components/shared/styles";
-import {
-  stationLabelFromCode,
-  fullStationLabelFromCode,
-} from "@/lib/railway-intelligence";
+import { stationLabelFromCode } from "@/lib/railway-intelligence";
 import { StationAutocomplete, resolveStationInput, DateQuickField } from "@/components/shared/StationAutocomplete";
 import { postJson } from "@/components/shared/api";
 import { todayIso, timeAmPm, stationCompactLabel } from "@/components/shared/utils";
@@ -52,6 +49,7 @@ import {
   dedupeSplitRoutes,
   isSeatAvailable,
   RunningDaysStrip,
+  fullStationLabelFromCode,
 } from "@/components/shared/TrustSummary";
 
 function cx(...parts: (string | false | undefined | null)[]) {
