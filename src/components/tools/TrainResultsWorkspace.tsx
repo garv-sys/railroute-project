@@ -96,6 +96,23 @@ import { ToolHeader } from "../layout/ToolHeader";
 import { CoachExplorer } from "./CoachExplorer";
 import { BookingWorkspace } from "./BookingWorkspace";
 
+const CKP_RAJASTHAN_DESTINATION_OPTIONS = [
+  { code: "JP", label: "Jaipur", note: "Jaipur Jn" },
+  { code: "UDZ", label: "Udaipur", note: "Udaipur City" },
+  { code: "AWR", label: "Alwar", note: "Alwar Jn" },
+  { code: "JU", label: "Jodhpur", note: "Jodhpur Jn" },
+  { code: "AII", label: "Ajmer", note: "Ajmer Jn" },
+  { code: "BHL", label: "Bhilwara", note: "Bhilwara" },
+  { code: "KOTA", label: "Kota", note: "Kota Jn" },
+  { code: "SWM", label: "Sawai Madhopur", note: "Sawai Madhopur" },
+];
+
+const CKP_ALIASES = new Set(["CKP", "CHAKRADHARPUR", "CHAKRADHARPUR JN", "CHAKRADHARPUR JUNCTION"]);
+
+function isCkpInput(value: string, query: string) {
+  const candidates = [value, query].map((item) => String(item || "").toUpperCase().trim()).filter(Boolean);
+  return candidates.some((item) => CKP_ALIASES.has(item) || item.includes("CHAKRADHARPUR"));
+}
 
 export function TrainResultsWorkspace() {
   const searchRequestId = useRef(0);
@@ -155,6 +172,8 @@ export function TrainResultsWorkspace() {
       window.removeEventListener("railroute-recent-searches-updated", loadRecentSearches);
     };
   }, []);
+
+  const showCkpRajasthanOptions = isCkpInput(source, sourceQuery);
 
   function deleteRecentSearch(fromVal: string, toVal: string) {
     try {
@@ -328,8 +347,8 @@ export function TrainResultsWorkspace() {
         (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
     });
 
-    return [...verified, ...sortedUnverified].slice(0, 15);
-  }, [filteredSplits, state.splits, sortBy, selectedSortClass, searchQuery]);
+    return [...verified, ...sortedUnverified].slice(0, showCkpRajasthanOptions ? 28 : 15);
+  }, [filteredSplits, state.splits, sortBy, selectedSortClass, searchQuery, showCkpRajasthanOptions]);
 
   const filteredMultiSplits = useMemo(() => {
     const fareLimit = Number(maxFare) || Infinity;
@@ -936,6 +955,23 @@ export function TrainResultsWorkspace() {
   const selectedPreferredHub = resolveStationInput(preferredHub, preferredHubQuery);
   const showSplitResults = hasSearched || state.splitLoading || state.splits.length > 0 || state.multiSplits.length > 0;
 
+  function searchCkpDestination(code: string) {
+    const nextDate = date || todayIso();
+    setSource("CKP");
+    setSourceQuery(stationLabelFromCode("CKP"));
+    setDestination(code);
+    setDestinationQuery(stationLabelFromCode(code));
+    runSearch(undefined, {
+      source: "CKP",
+      destination: code,
+      date: nextDate,
+      classType,
+      quota,
+      preferredHub: "",
+      pushUrl: true,
+    });
+  }
+
   return (
     <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6">
       <div className={softPanel("rounded-[32px] p-5")}>
@@ -973,6 +1009,39 @@ export function TrainResultsWorkspace() {
           {allowSplit && selectedPreferredHub && selectedPreferredHub !== source && selectedPreferredHub !== destination && (
             <div className="mt-3 rounded-2xl border border-cyan-300/40 bg-cyan-50 px-4 py-3 text-sm font-bold text-cyan-900 dark:bg-cyan-300/10 dark:text-cyan-50">
               Prioritizing split journeys via {fullStationLabelFromCode(selectedPreferredHub)}.
+            </div>
+          )}
+          {showCkpRajasthanOptions && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-3 dark:border-white/10 dark:bg-white/6">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">CKP Rajasthan options</span>
+                <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500">Live seats and fares check per exact train leg</span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {CKP_RAJASTHAN_DESTINATION_OPTIONS.map((option) => {
+                  const active = destination === option.code;
+                  return (
+                    <button
+                      key={option.code}
+                      type="button"
+                      onClick={() => searchCkpDestination(option.code)}
+                      className={`flex min-h-16 items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition ${
+                        active
+                          ? "border-cyan-300 bg-cyan-50 text-cyan-950 dark:bg-cyan-300/12 dark:text-cyan-50"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-cyan-300 dark:border-white/10 dark:bg-white/6 dark:text-slate-200"
+                      }`}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-black">{option.label}</span>
+                        <span className="mt-0.5 block truncate text-[11px] font-bold text-slate-500 dark:text-slate-400">{option.note}</span>
+                      </span>
+                      <span className="shrink-0 rounded-md border border-cyan-300/40 bg-cyan-100 px-2 py-1 text-xs font-black text-cyan-800 dark:bg-cyan-300/10 dark:text-cyan-100">
+                        {option.code}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </form>
@@ -1715,18 +1784,6 @@ export function PremiumTrainCard({
     return () => { active = false; };
   }, [mapOpen, train.trainNo, mapRoute.length]);
 
-  const mapStations = useMemo(() => {
-    if (mapRoute && mapRoute.length > 0) {
-      return mapRoute.map((stop: any) => ({
-        code: stop.code || stop.stationCode,
-        name: stop.name || stop.stationName || stop.code
-      }));
-    }
-    return [
-      { code: actualSource || train.source, name: fullStationLabelFromCode(actualSource || train.source) },
-      { code: actualDestination || train.destination, name: fullStationLabelFromCode(actualDestination || train.destination) }
-    ];
-  }, [mapRoute, actualSource, actualDestination, train.source, train.destination]);
   const routeAvailable = Boolean(train.trainNo);
   const trustMeta = train.trustMeta || trustMetaFromTrain(train);
   const primaryClass = primaryClassCode(train);

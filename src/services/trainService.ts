@@ -584,6 +584,12 @@ function normalizeStationCode(code: string) {
     'BULANDSHAHR': 'BSC',
     'BHULANDSEHER': 'BSC',
     'BULANDSEHER': 'BSC',
+    'ALWAR': 'AWR',
+    'ALWAR JN': 'AWR',
+    'ALWAR JUNCTION': 'AWR',
+    'JODHPUR': 'JU',
+    'JODHPUR JN': 'JU',
+    'JODHPUR JUNCTION': 'JU',
     'DEHRADUN': 'DDN',
     'LUCKNOW': 'LKO',
     'VAR': 'BSB',
@@ -1058,6 +1064,17 @@ const NATIONAL_LONG_DISTANCE_SPLIT_HUBS = [
   'MFP', 'SPJ', 'SHC', 'GKP', 'GD',
 ];
 
+const RAJASTHAN_SPLIT_DESTINATIONS = new Set(['JP', 'GADJ', 'AII', 'AWR', 'JU', 'UDZ', 'BHL', 'KOTA', 'SWM', 'ABR', 'BKN', 'BGKT']);
+const CKP_RAJASTHAN_PRIORITY_HUBS = [
+  'TATA', 'ROU', 'BSP', 'R', 'APR', 'KTE', 'JBP', 'ET', 'BPL',
+  'UJN', 'RTM', 'KOTA', 'SWM', 'JP', 'AWR', 'AII', 'BHL', 'UDZ', 'JU',
+  'AGC', 'MTJ', 'NDLS', 'NZM', 'DLI',
+];
+
+function isCkpRajasthanSearch(source: string, dest: string) {
+  return normalizeStationCode(source) === 'CKP' && RAJASTHAN_SPLIT_DESTINATIONS.has(normalizeStationCode(dest));
+}
+
 export function stationCoordinatesForRouting(code: string) {
   const normalized = normalizeStationCode(code);
   const directHub = MAJOR_HUB_BY_CODE.get(normalized);
@@ -1150,7 +1167,7 @@ const USER_PRIORITY_HUBS = new Set([
   'CNB',
   'BSB', 'BSBS',
   'AGC', 'TDL', 'MTJ',
-  'KOTA', 'SWM', 'JP', 'GADJ', 'FL', 'AII'
+  'KOTA', 'SWM', 'JP', 'GADJ', 'FL', 'AII', 'AWR', 'JU', 'UDZ', 'BHL', 'RTM', 'UJN', 'APR'
 ]);
 
 const STRATEGIC_SPLIT_HUBS = [
@@ -1158,7 +1175,7 @@ const STRATEGIC_SPLIT_HUBS = [
   'CNB', 'LKO', 'LJN',
   'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE',
   'TDL', 'AGC', 'MTJ',
-  'KOTA', 'SWM', 'JP', 'GADJ', 'FL', 'AII',
+  'KOTA', 'SWM', 'JP', 'GADJ', 'FL', 'AII', 'AWR', 'JU', 'UDZ', 'BHL',
 ];
 
 const DELHI_SPLIT_HUBS = ['NDLS', 'DLI', 'NZM', 'ANVT'];
@@ -1167,14 +1184,14 @@ const HUB_IMPORTANCE: Record<string, number> = {
   NDLS: 100, DLI: 96, NZM: 94, ANVT: 88, DEE: 82,
   CNB: 96, PRYJ: 95, ALD: 90, DDU: 94, MGS: 88, BSB: 86, BSBS: 78,
   LKO: 90, LJN: 82, AGC: 84, TDL: 82, MTJ: 78,
-  KOTA: 92, SWM: 82, JP: 88, GADJ: 72, FL: 76, AII: 84,
+  KOTA: 92, SWM: 82, JP: 88, GADJ: 72, FL: 76, AII: 84, AWR: 78, JU: 82, UDZ: 80, BHL: 74, RTM: 78, UJN: 78, APR: 72,
 };
 
 const HUB_TRAIN_DENSITY: Record<string, number> = {
   NDLS: 100, DLI: 94, NZM: 92, ANVT: 86, DEE: 80,
   CNB: 96, PRYJ: 94, ALD: 88, DDU: 92, MGS: 86, BSB: 84, BSBS: 76,
   LKO: 90, LJN: 80, AGC: 84, TDL: 82, MTJ: 76,
-  KOTA: 90, SWM: 78, JP: 86, GADJ: 70, FL: 76, AII: 82,
+  KOTA: 90, SWM: 78, JP: 86, GADJ: 70, FL: 76, AII: 82, AWR: 72, JU: 78, UDZ: 76, BHL: 70, RTM: 78, UJN: 76, APR: 68,
 };
 
 function hubDisplayName(code: string) {
@@ -1322,10 +1339,14 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
   const longDistancePriorityHubs = directDistance >= 400
     ? NATIONAL_LONG_DISTANCE_SPLIT_HUBS.filter((hub) => !excluded.has(hub))
     : [];
+  const ckpRajasthanHubs = isCkpRajasthanSearch(normalizedSource, normalizedDest)
+    ? CKP_RAJASTHAN_PRIORITY_HUBS.filter((hub) => !excluded.has(hub))
+    : [];
   
-  const candidates = Array.from(new Set([preferred, ...nearbySourceHubs, ...nearbyDestHubs, ...STRATEGIC_SPLIT_HUBS, ...longDistancePriorityHubs, ...sorted.map((hub) => hub.code)].filter(Boolean)));
+  const candidates = Array.from(new Set([preferred, ...ckpRajasthanHubs, ...nearbySourceHubs, ...nearbyDestHubs, ...STRATEGIC_SPLIT_HUBS, ...longDistancePriorityHubs, ...sorted.map((hub) => hub.code)].filter(Boolean)));
   const filteredCandidates = candidates.filter((hubCode) => {
     if (hubCode === preferred) return true;
+    if (ckpRajasthanHubs.includes(hubCode)) return true;
     if (USER_PRIORITY_HUBS.has(hubCode)) return true;
     if (nearbySourceHubs.includes(hubCode)) return true;
     if (nearbyDestHubs.includes(hubCode)) return true;
@@ -1342,6 +1363,9 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     let score = dynamicHubScore(sourceCoord, destCoord, hubObj as MajorHub);
     if (USER_PRIORITY_HUBS.has(code)) {
       score -= 500;
+    }
+    if (ckpRajasthanHubs.includes(code)) {
+      score -= 650;
     }
     return score;
   };
@@ -1387,6 +1411,18 @@ function hubGroupForDiversity(code: string) {
   if (['LKO', 'LJN'].includes(normalized)) {
     return 'LUCKNOW';
   }
+  if (['JP', 'GADJ', 'FL'].includes(normalized)) {
+    return 'JAIPUR_AREA';
+  }
+  if (['AII', 'BHL', 'UDZ'].includes(normalized)) {
+    return 'MEWAR_AJMER';
+  }
+  if (['JU', 'BGKT'].includes(normalized)) {
+    return 'JODHPUR_AREA';
+  }
+  if (['AWR', 'RE'].includes(normalized)) {
+    return 'ALWAR_AREA';
+  }
   return normalized;
 }
 
@@ -1412,6 +1448,11 @@ function hubLabel(code: string) {
     BPL: 'Bhopal Junction (BPL)',
     KOTA: 'Kota Junction (KOTA)',
     JP: 'Jaipur Junction (JP)',
+    AWR: 'Alwar Junction (AWR)',
+    AII: 'Ajmer Junction (AII)',
+    BHL: 'Bhilwara (BHL)',
+    UDZ: 'Udaipur City (UDZ)',
+    JU: 'Jodhpur Junction (JU)',
     NGP: 'Nagpur Junction (NGP)',
     ET: 'Itarsi Junction (ET)',
     BZA: 'Vijayawada Junction (BZA)',

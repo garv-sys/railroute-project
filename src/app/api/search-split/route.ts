@@ -8,6 +8,13 @@ function localRecommendation(directTrains: any[], splitRoutes: any[], multiSplit
   return `Provider returned ${directTrains?.length || 0} direct train(s), ${splitRoutes?.length || 0} two-leg split option(s), and ${multiSplitRoutes?.length || 0} multi-leg split option(s).${budgetNote}`;
 }
 
+const CKP_RAJASTHAN_DESTINATIONS = new Set(['JP', 'GADJ', 'AWR', 'JU', 'UDZ', 'BHL', 'AII', 'KOTA', 'SWM']);
+
+function isCkpRajasthanRequest(source: unknown, destination: unknown) {
+  return String(source || '').toUpperCase().trim() === 'CKP' &&
+    CKP_RAJASTHAN_DESTINATIONS.has(String(destination || '').toUpperCase().trim());
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -41,6 +48,7 @@ export async function POST(request: Request) {
       return validationFailure('Missing required parameters', requestId);
     }
 
+    const ckpRajasthanRequest = isCkpRajasthanRequest(source, destination);
     const coverageMode = "quick" as const;
     const plannerOptions = {
       debug: Boolean(debug),
@@ -49,16 +57,16 @@ export async function POST(request: Request) {
       coverageMode,
       exactStationOnly: false,
       providerPairLimit: 1,
-      maxSplitHubs: 10,
-      maxSplitLegOptions: 16,
-      maxSplitCandidates: 180,
-      maxSplitResults: 15,
+      maxSplitHubs: ckpRajasthanRequest ? 26 : 10,
+      maxSplitLegOptions: ckpRajasthanRequest ? 24 : 16,
+      maxSplitCandidates: ckpRajasthanRequest ? 260 : 180,
+      maxSplitResults: ckpRajasthanRequest ? 28 : 15,
       maxMultiPlans: 0,
       maxMultiLegOptions: 0,
       maxMultiCandidates: 0,
       maxMultiResults: 0,
       plannerLegTimeoutMs: 3200,
-      globalTimeoutMs: 8500,
+      globalTimeoutMs: ckpRajasthanRequest ? 11500 : 8500,
       allowMixedClassSplits: true,
     } as const;
 
@@ -68,12 +76,12 @@ export async function POST(request: Request) {
       : await withTimeout(
         findMultiSplitRoutes(source, destination, date, classType, preferredHub, {
           ...plannerOptions,
-          maxMultiPlans: 10,
+          maxMultiPlans: ckpRajasthanRequest ? 14 : 10,
           maxMultiLegOptions: 4,
-          maxMultiCandidates: 80,
-          maxMultiResults: 16,
+          maxMultiCandidates: ckpRajasthanRequest ? 120 : 80,
+          maxMultiResults: ckpRajasthanRequest ? 18 : 16,
         }),
-        3_000,
+        ckpRajasthanRequest ? 4_500 : 3_000,
         []
       );
     const routeRecommendation = localRecommendation(directTrains, splitRoutes, multiSplitRoutes, budget);
