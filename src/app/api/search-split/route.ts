@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       coverageMode,
       exactStationOnly: false,
       providerPairLimit: 20,
-      maxSplitHubs: 15,
+      maxSplitHubs: 35,
       maxSplitLegOptions: 60,
       maxSplitCandidates: 400,
       maxSplitResults: 15,
