@@ -2164,7 +2164,7 @@ export async function searchTrainsSmart(source: string, dest: string, date: stri
         }
         if (res.isNoTrainsResponse) {
           logProviderIssue('train-between successfully checked - zero trains found (from no-trains response)', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date });
-          return getFallbackResult();
+          return [];
         }
         const providerTrains = providerTrainList(res);
         if (providerTrains.length > 0) {
