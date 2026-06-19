@@ -1,5 +1,5 @@
-import { GodModeDashboard } from "@/components/tools/GodModeDashboard";
+import { GodModeWorkspace } from "@/components/tools/GodModeWorkspace";
 
 export default function GodModePage() {
-  return <GodModeDashboard />;
+  return <GodModeWorkspace />;
 }
