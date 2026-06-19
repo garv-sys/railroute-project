@@ -1499,11 +1499,31 @@ async function generate6DayAvailability(
 
   try {
     const availData = await fetchAvailWithStationFallback(trainNo, source, destination, startDateStr, classCode);
+    const isDemoMode = !process.env.IRCTC_API_KEY?.trim();
     if (!availData || availData.success === false) {
-      const isDemoMode = !process.env.IRCTC_API_KEY?.trim();
       const errorMsg = availData?.error || 'Provider check failed';
-      const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
+      if (!isDemoMode) {
+        for (let j = 0; j < 6; j++) {
+          const dj = new Date(baseDate.getTime());
+          dj.setDate(dj.getDate() + j);
+          const jsDay = dj.getDay();
+          const idx = jsDay === 0 ? 6 : jsDay - 1;
+          const runs = runningDays ? runningDays[idx] : true;
+          list.push(unavailableRow(
+            dj,
+            runs ? `API check failed: ${errorMsg}` : 'Not Running',
+            runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
+            !runs,
+            0,
+            undefined,
+            runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
+            runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+          ));
+        }
+        return list;
+      }
       
+      const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
       for (let j = 0; j < 6; j++) {
         const dj = new Date(baseDate.getTime());
         dj.setDate(dj.getDate() + j);
@@ -1513,7 +1533,7 @@ async function generate6DayAvailability(
         const mockDay = getMockStatusForDay(dj, j, runs);
         
         list.push({
-          dateStr: `${daysOfWeek[dj.getDay()]}`, // Wait, it needs the correct format matching the original: `${daysOfWeek[dj.getDay()]}, ${String(dj.getDate()).padStart(2, '0')} ${months[dj.getMonth()]}`
+          dateStr: `${daysOfWeek[dj.getDay()]}`,
           rawDate: localIsoDate(dj),
           status: mockDay.status,
           text: mockDay.text,
@@ -1522,13 +1542,12 @@ async function generate6DayAvailability(
           notRunning: !runs,
           confirmationChance: mockDay.confirmationChance,
           fareBreakdown: { baseFare: mockFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: mockFare },
-          updatedTime: isDemoMode ? 'Estimated fallback (demo mode)' : `Estimated fallback (${errorMsg})`,
+          updatedTime: 'Estimated fallback (demo mode)',
           availabilityStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
           fareStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
           lookupReason: runs ? mockDay.text : 'Not Running',
           proof: proofFor(dj),
         });
-        // Correct dateStr inside the loop
         list[list.length - 1].dateStr = `${daysOfWeek[dj.getDay()]}, ${String(dj.getDate()).padStart(2, '0')} ${months[dj.getMonth()]}`;
       }
       return list;
@@ -1562,6 +1581,19 @@ async function generate6DayAvailability(
         if (liveItem) {
           const rawStatus = String(liveItem.availabilityText || liveItem.status || liveItem.Availability || '').toUpperCase().trim();
           if (!rawStatus || /availability unavailable/i.test(rawStatus)) {
+            if (!isDemoMode) {
+              list.push(unavailableRow(
+                dj,
+                runs ? 'Availability unavailable from provider' : 'Not Running',
+                runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
+                !runs,
+                0,
+                undefined,
+                runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
+                runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+              ));
+              continue;
+            }
             const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
             const mockDay = getMockStatusForDay(dj, j, runs);
 
@@ -1659,6 +1691,19 @@ async function generate6DayAvailability(
             };
           }
         } else {
+          if (!isDemoMode) {
+            list.push(unavailableRow(
+              dj,
+              runs ? 'Not returned in provider response' : 'Not Running',
+              runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
+              !runs,
+              0,
+              undefined,
+              runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
+              runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+            ));
+            continue;
+          }
           const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
           const mockDay = getMockStatusForDay(dj, j, runs);
 
@@ -1682,6 +1727,26 @@ async function generate6DayAvailability(
       }
       return list;
     } else {
+      if (!isDemoMode) {
+        for (let j = 0; j < 6; j++) {
+          const dj = new Date(baseDate.getTime());
+          dj.setDate(dj.getDate() + j);
+          const jsDay = dj.getDay();
+          const idx = jsDay === 0 ? 6 : jsDay - 1;
+          const runs = runningDays ? runningDays[idx] : true;
+          list.push(unavailableRow(
+            dj,
+            runs ? 'Invalid response format from provider' : 'Not Running',
+            runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
+            !runs,
+            0,
+            undefined,
+            runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
+            runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+          ));
+        }
+        return list;
+      }
       const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
       for (let j = 0; j < 6; j++) {
         const dj = new Date(baseDate.getTime());
@@ -1712,6 +1777,27 @@ async function generate6DayAvailability(
     }
   } catch (error: any) {
     console.warn(`[IRCTC] Availability check failed for ${trainNo}`, error?.message || error);
+    const isDemoMode = !process.env.IRCTC_API_KEY?.trim();
+    if (!isDemoMode) {
+      for (let j = 0; j < 6; j++) {
+        const dj = new Date(baseDate.getTime());
+        dj.setDate(dj.getDate() + j);
+        const jsDay = dj.getDay();
+        const idx = jsDay === 0 ? 6 : jsDay - 1;
+        const runs = runningDays ? runningDays[idx] : true;
+        list.push(unavailableRow(
+          dj,
+          runs ? `API check failed: ${error?.message || error}` : 'Not Running',
+          runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
+          !runs,
+          0,
+          undefined,
+          runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
+          runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+        ));
+      }
+      return list;
+    }
     const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
     for (let j = 0; j < 6; j++) {
       const dj = new Date(baseDate.getTime());
@@ -2015,7 +2101,8 @@ export async function searchTrainsSmart(source: string, dest: string, date: stri
         const res = await plannerTimeout(searchDirectTrains(pair.source, pair.dest, date), options.plannerLegTimeoutMs || 4500, null as any);
         if (!res) {
           logProviderIssue('train-between request timed out', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date });
-          return generateMockTrainsLocal(pair.source, pair.dest, date);
+          if (isDemoMode) return generateMockTrainsLocal(pair.source, pair.dest, date);
+          return [];
         }
         if (res.isNoTrainsResponse) {
           logProviderIssue('train-between successfully checked - zero trains found (from no-trains response)', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date });
@@ -2038,13 +2125,15 @@ export async function searchTrainsSmart(source: string, dest: string, date: stri
         }
         if (res.success === false) {
           logProviderIssue('train-between request failed with error', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date }, res.error || res);
-          return generateMockTrainsLocal(pair.source, pair.dest, date);
+          if (isDemoMode) return generateMockTrainsLocal(pair.source, pair.dest, date);
+          return [];
         }
         logProviderIssue('empty train-between response', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date }, res);
         return [];
       } catch (error) {
         logProviderIssue('train-between request failed', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date }, error instanceof Error ? { message: error.message, stack: error.stack } : error);
-        return generateMockTrainsLocal(pair.source, pair.dest, date);
+        if (isDemoMode) return generateMockTrainsLocal(pair.source, pair.dest, date);
+        return [];
       }
     };
 

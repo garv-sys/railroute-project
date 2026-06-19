@@ -996,6 +996,121 @@ const CKP_ROUTES = [
     borderColor: "border-blue-400/30",
     badgeColor: "text-blue-200 border-blue-300/30 bg-blue-400/10",
   },
+  {
+    id: "ckp-jp",
+    from: "CKP",
+    to: "JP",
+    fromLabel: "Chakradharpur",
+    toLabel: "Jaipur Jn",
+    fromState: "Jharkhand",
+    toState: "Rajasthan",
+    approxDuration: "~22h",
+    highlight: "Pink City direct corridor",
+    color: "from-pink-500/20 to-rose-600/20",
+    borderColor: "border-pink-400/30",
+    badgeColor: "text-pink-200 border-pink-300/30 bg-pink-400/10",
+  },
+  {
+    id: "rnc-jp",
+    from: "RNC",
+    to: "JP",
+    fromLabel: "Ranchi Jn",
+    toLabel: "Jaipur Jn",
+    fromState: "Jharkhand",
+    toState: "Rajasthan",
+    approxDuration: "~24h",
+    highlight: "Capital to Pink City express",
+    color: "from-violet-500/20 to-purple-600/20",
+    borderColor: "border-violet-400/30",
+    badgeColor: "text-violet-200 border-violet-300/30 bg-violet-400/10",
+  },
+  {
+    id: "jp-rnc",
+    from: "JP",
+    to: "RNC",
+    fromLabel: "Jaipur Jn",
+    toLabel: "Ranchi Jn",
+    fromState: "Rajasthan",
+    toState: "Jharkhand",
+    approxDuration: "~24h",
+    highlight: "Return — Pink City to Capital",
+    color: "from-cyan-500/20 to-sky-600/20",
+    borderColor: "border-cyan-400/30",
+    badgeColor: "text-cyan-200 border-cyan-300/30 bg-cyan-400/10",
+  },
+];
+
+const PATNA_ROUTES = [
+  {
+    id: "pnbe-awr",
+    from: "PNBE",
+    to: "AWR",
+    fromLabel: "Patna Junction",
+    toLabel: "Alwar",
+    fromState: "Bihar",
+    toState: "Rajasthan",
+    approxDuration: "~18h",
+    highlight: "Agra & Alwar gateway link",
+    color: "from-sky-500/20 to-indigo-600/20",
+    borderColor: "border-sky-400/30",
+    badgeColor: "text-sky-200 border-sky-300/30 bg-sky-400/10",
+  },
+  {
+    id: "pnbe-jp",
+    from: "PNBE",
+    to: "JP",
+    fromLabel: "Patna Junction",
+    toLabel: "Jaipur Jn",
+    fromState: "Bihar",
+    toState: "Rajasthan",
+    approxDuration: "~18h",
+    highlight: "Direct Ziyarat Exp corridor",
+    color: "from-pink-500/20 to-rose-600/20",
+    borderColor: "border-pink-400/30",
+    badgeColor: "text-pink-200 border-pink-300/30 bg-pink-400/10",
+  },
+  {
+    id: "pnbe-ghy",
+    from: "PNBE",
+    to: "GHY",
+    fromLabel: "Patna Junction",
+    toLabel: "Guwahati",
+    fromState: "Bihar",
+    toState: "Assam",
+    approxDuration: "~16h",
+    highlight: "Rajdhani & Express Corridor",
+    color: "from-emerald-500/20 to-teal-600/20",
+    borderColor: "border-emerald-400/30",
+    badgeColor: "text-emerald-200 border-emerald-300/30 bg-emerald-400/10",
+  },
+  {
+    id: "pnbe-ju",
+    from: "PNBE",
+    to: "JU",
+    fromLabel: "Patna Junction",
+    toLabel: "Jodhpur Jn",
+    fromState: "Bihar",
+    toState: "Rajasthan",
+    approxDuration: "~22h",
+    highlight: "Direct Howrah Jodhpur link",
+    color: "from-amber-500/20 to-orange-600/20",
+    borderColor: "border-amber-400/30",
+    badgeColor: "text-amber-200 border-amber-300/30 bg-amber-400/10",
+  },
+  {
+    id: "pnbe-udz",
+    from: "PNBE",
+    to: "UDZ",
+    fromLabel: "Patna Junction",
+    toLabel: "Udaipur City",
+    fromState: "Bihar",
+    toState: "Rajasthan",
+    approxDuration: "~24h",
+    highlight: "Kavi Guru Express link",
+    color: "from-rose-500/20 to-red-600/20",
+    borderColor: "border-rose-400/30",
+    badgeColor: "text-rose-200 border-rose-300/30 bg-rose-400/10",
+  },
 ];
 
 function CKPRoutesExplorer({
@@ -1003,29 +1118,59 @@ function CKPRoutesExplorer({
 }: {
   onSelectRoute: (from: string, to: string) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<'jharkhand' | 'bihar'>('jharkhand');
+  const activeRoutes = activeTab === 'jharkhand' ? CKP_ROUTES : PATNA_ROUTES;
+
   return (
     <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
-      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-black uppercase text-cyan-100">
-            <Zap className="h-3 w-3" />
-            CKP Route Explorer
-          </span>
-          <h2 className="mt-3 text-3xl font-black text-white sm:text-4xl">
-            Chakradharpur Corridors
+          <div className="mb-3 flex gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-black uppercase text-cyan-100">
+              <Zap className="h-3 w-3" />
+              {activeTab === 'jharkhand' ? 'Jharkhand × Rajasthan Corridors' : 'Bihar × National Corridors'}
+            </span>
+          </div>
+          <h2 className="text-3xl font-black text-white sm:text-4xl">
+            {activeTab === 'jharkhand' ? 'CKP & Ranchi Express Routes' : 'Patna Express Routes'}
           </h2>
           <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-slate-400">
-            Explore live trains from <strong className="text-white">Chakradharpur (CKP)</strong> to major Rajasthan destinations — Udaipur, Alwar, and Jodhpur. Click any route to load real-time trains, fares, and seat availability.
+            {activeTab === 'jharkhand'
+              ? 'Live trains from Chakradharpur (CKP) and Ranchi (RNC) to Udaipur, Alwar, Jodhpur, and Jaipur — plus the return Jaipur→Ranchi corridor. One click loads real fares & seat availability.'
+              : 'Direct and connecting trains from Patna Junction (PNBE) to Alwar, Jaipur, Guwahati, Jodhpur, and Udaipur. One click loads live fares & seat availability.'
+            }
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/6 px-4 py-2">
-          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs font-black text-emerald-200">Live data</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex gap-1.5 rounded-2xl bg-white/5 p-1.5 border border-white/8 backdrop-blur-xl">
+            <button
+              type="button"
+              onClick={() => setActiveTab('jharkhand')}
+              className={`rounded-xl px-4 py-2 text-xs font-black transition ${
+                activeTab === 'jharkhand' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Jharkhand
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('bihar')}
+              className={`rounded-xl px-4 py-2 text-xs font-black transition ${
+                activeTab === 'bihar' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Bihar (Patna)
+            </button>
+          </div>
+          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/6 px-4 py-2.5 h-[38px]">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs font-black text-emerald-200">Live API data</span>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-3">
-        {CKP_ROUTES.map((route) => (
+      <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        {activeRoutes.map((route) => (
           <motion.button
             key={route.id}
             type="button"
@@ -1087,16 +1232,28 @@ function CKPRoutesExplorer({
       </div>
 
       {/* Route stats bar */}
-      <div className="mt-6 grid grid-cols-3 gap-4 rounded-[24px] border border-white/8 bg-white/5 p-5 backdrop-blur-xl">
-        {[
-          { label: "CKP → UDZ", sub: "Via Ratlam / Nagda", icon: Route },
-          { label: "CKP → AWR", sub: "Via Delhi / Mathura", icon: Route },
-          { label: "CKP → JU", sub: "Via Jaipur / Ajmer", icon: Route },
-        ].map(({ label, sub, icon: Icon }) => (
-          <div key={label} className="flex items-center gap-3">
-            <Icon className="h-4 w-4 text-cyan-300 shrink-0" />
+      <div className={`mt-6 grid grid-cols-2 gap-4 rounded-[24px] border border-white/8 bg-white/5 p-5 backdrop-blur-xl sm:grid-cols-3 ${activeTab === 'jharkhand' ? 'lg:grid-cols-6' : 'lg:grid-cols-5'}`}>
+        {(activeTab === 'jharkhand'
+          ? [
+              { label: "CKP → UDZ", sub: "Via Ratlam", icon: Route },
+              { label: "CKP → AWR", sub: "Via Delhi", icon: Route },
+              { label: "CKP → JU", sub: "Via Ajmer", icon: Route },
+              { label: "CKP → JP", sub: "Via Nagda", icon: Route },
+              { label: "RNC → JP", sub: "Via Bokaro", icon: Route },
+              { label: "JP → RNC", sub: "Return corridor", icon: Route },
+            ]
+          : [
+              { label: "PNBE → AWR", sub: "Via Agra / JP", icon: Route },
+              { label: "PNBE → JP", sub: "Ziyarat Exp", icon: Route },
+              { label: "PNBE → GHY", sub: "Rajdhani / Exp", icon: Route },
+              { label: "PNBE → JU", sub: "Howrah-JU link", icon: Route },
+              { label: "PNBE → UDZ", sub: "Kavi Guru link", icon: Route },
+            ]
+        ).map(({ label, sub, icon: Icon }) => (
+          <div key={label} className="flex items-center gap-2">
+            <Icon className="h-3.5 w-3.5 text-cyan-300 shrink-0" />
             <div>
-              <div className="text-sm font-black text-white">{label}</div>
+              <div className="text-xs font-black text-white">{label}</div>
               <div className="text-[10px] font-semibold text-slate-500">{sub}</div>
             </div>
           </div>
