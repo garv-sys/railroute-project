@@ -57,8 +57,8 @@ export async function POST(request: Request) {
       maxMultiLegOptions: 0,
       maxMultiCandidates: 0,
       maxMultiResults: 0,
-      plannerLegTimeoutMs: 4500,
-      globalTimeoutMs: 18000,
+      plannerLegTimeoutMs: 2500,
+      globalTimeoutMs: 5000,
     } as const;
 
     const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
           maxMultiCandidates: 80,
           maxMultiResults: 10,
         }),
-        3_000,
+        2000,
         []
       );
     const routeRecommendation = localRecommendation(directTrains, splitRoutes, multiSplitRoutes, budget);

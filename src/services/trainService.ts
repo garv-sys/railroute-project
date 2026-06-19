@@ -658,6 +658,8 @@ const CITY_TERMINAL_CLUSTERS: Record<string, string[]> = {
   SFG: ['SFG', 'PRYJ', 'PCOI', 'PRRB', 'ALD'],
   LKO: ['LKO', 'LJN'],
   LJN: ['LJN', 'LKO'],
+  JHS: ['JHS', 'VGLJ'],
+  VGLJ: ['VGLJ', 'JHS'],
   CNB: ['CNB', 'CPB'],
   CPB: ['CPB', 'CNB'],
   NDLS: ['NDLS', 'DLI', 'NZM', 'ANVT', 'DEE', 'DEC'],
