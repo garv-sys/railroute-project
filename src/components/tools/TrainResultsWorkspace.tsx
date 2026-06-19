@@ -95,6 +95,7 @@ import { ProductShell } from "../layout/ProductShell";
 import { ToolHeader } from "../layout/ToolHeader";
 import { CoachExplorer } from "./CoachExplorer";
 import { BookingWorkspace } from "./BookingWorkspace";
+import { RouteScheduleCalendar } from "./RouteScheduleCalendar";
 
 
 export function TrainResultsWorkspace() {
@@ -114,7 +115,7 @@ export function TrainResultsWorkspace() {
   const [classType, setClassType] = useState("3A");
   const [quota, setQuota] = useState("GN");
   const allowSplit = true;
-  const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi">("all");
+  const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi" | "calendar">("all");
   const [sortBy, setSortBy] = useState<"best" | "cheapest" | "highestFare" | "fastest" | "lowestLayover" | "earliest" | "latest">("best");
   const [maxFare, setMaxFare] = useState("");
   const [maxDuration, setMaxDuration] = useState("");
@@ -1128,8 +1129,9 @@ export function TrainResultsWorkspace() {
 	                : `All options (${allOptionCount})`],
 	              ["direct", directTabLabel],
 	              ["split", state.splitLoading && visibleSplitCount === 0 ? "Split Journey (finding...)" : `Split Journey (${visibleSplitCount})`],
+                ["calendar", "📅 60-Day Calendar View"],
 	            ].map(([key, label]) => (
-              <button key={key} type="button" onClick={() => setResultMode(key as "all" | "direct" | "split" | "multi")} className={`rounded-full border px-4 py-2 text-xs font-black ${resultMode === key ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 bg-white text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300"}`}>
+              <button key={key} type="button" onClick={() => setResultMode(key as "all" | "direct" | "split" | "multi" | "calendar")} className={`rounded-full border px-4 py-2 text-xs font-black ${resultMode === key ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 bg-white text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300"}`}>
                 {label}
               </button>
             ))}
@@ -1183,6 +1185,16 @@ export function TrainResultsWorkspace() {
 
           {/* Emergency travel panel removed per request */}
 	      <div className="mt-6 space-y-4">
+        {resultMode === "calendar" && (
+          <RouteScheduleCalendar
+            source={source}
+            destination={destination}
+            activeDate={date}
+            onSelectDate={selectNearbyDate}
+            searchResultsTrains={state.trains}
+            searchResultsSplits={state.splits}
+          />
+        )}
         {(resultMode === "all" || resultMode === "direct") && (
           <>
             <ResultSectionHeader title="Direct Trains" detail="Single-train journeys returned by the provider for the selected station pair/date." />

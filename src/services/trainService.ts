@@ -2907,14 +2907,28 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	    ].map((value) => String(value || '').toUpperCase()).join('|');
 
     const hubGroupCounts = new Map<string, number>();
+    const leg1TrainCounts = new Map<string, number>();
+    const leg2TrainCounts = new Map<string, number>();
 
     const addRoute = (route: SplitRouteResult, strictShape: boolean, enforceGroupLimit: boolean) => {
       if (!route || finalDiverseRoutes.length >= splitResultLimit) return false;
+
+      const t1No = cleanTrainNo(route.leg1?.trainNo || "");
+      const t2No = cleanTrainNo(route.leg2?.trainNo || "");
 
       const group = hubGroupForDiversity(route.hubStation);
       if (enforceGroupLimit) {
         const count = hubGroupCounts.get(group) || 0;
         if (count >= 3) return false;
+
+        if (t1No) {
+          const t1Count = leg1TrainCounts.get(t1No) || 0;
+          if (t1Count >= 3) return false;
+        }
+        if (t2No) {
+          const t2Count = leg2TrainCounts.get(t2No) || 0;
+          if (t2Count >= 3) return false;
+        }
       }
 
       const hubKey = splitShapeWithHubKey(route);
@@ -2926,6 +2940,8 @@ export async function findSmartRoutes(source: string, dest: string, date: string
       usedShapes.add(shape);
       usedShapesWithHubs.add(hubKey);
       hubGroupCounts.set(group, (hubGroupCounts.get(group) || 0) + 1);
+      if (t1No) leg1TrainCounts.set(t1No, (leg1TrainCounts.get(t1No) || 0) + 1);
+      if (t2No) leg2TrainCounts.set(t2No, (leg2TrainCounts.get(t2No) || 0) + 1);
       finalDiverseRoutes.push(route);
       return true;
     };
