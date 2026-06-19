@@ -225,6 +225,25 @@ function normalizeDate(d?: string) {
   return cleanDate;
 }
 
+function isTodayOrTomorrow(dateStr: string): boolean {
+  try {
+    const [day, month, year] = dateStr.split('-').map(Number);
+    const targetDate = new Date(year, month - 1, day);
+    targetDate.setHours(0, 0, 0, 0);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+
+    return targetDate.getTime() === today.getTime() || targetDate.getTime() === tomorrow.getTime();
+  } catch {
+    return true; // Safe fallback
+  }
+}
+
 function generateMockTrains(fromStn: string, toStn: string): any[] {
   const trainSpecs = [
     { no: '90001', name: 'SF EXPRESS', dep: '08:00', arr: '16:00', dur: '08:00' },
@@ -250,6 +269,7 @@ function generateMockTrains(fromStn: string, toStn: string): any[] {
 export async function searchDirectTrains(fromStn: string, toStn: string, date?: string) {
   const dateStr = normalizeDate(date);
   const key = `search_${fromStn}_${toStn}_${dateStr}`;
+  const dynamicTtl = isTodayOrTomorrow(dateStr) ? 3 * 60 * 1000 : 10 * 60 * 1000;
   return trainListCache.fetch(key, async () => {
     try {
       ensureIrctcConfigured();
@@ -307,12 +327,13 @@ export async function searchDirectTrains(fromStn: string, toStn: string, date?: 
         isNoTrainsResponse: false,
       };
     }
-  }, TRAIN_BETWEEN_CACHE_TTL_MS);
+  }, dynamicTtl);
 }
 
 export async function checkSeatAvailability(trainNo: string, fromStn: string, toStn: string, date: string, classType: string, quota = 'GN') {
   const dateStr = normalizeDate(date);
   const key = `avail_${trainNo}_${fromStn}_${toStn}_${dateStr}_${classType}_${quota}`;
+  const dynamicTtl = isTodayOrTomorrow(dateStr) ? 30 * 1000 : 5 * 60 * 1000;
   return availabilityCache.fetch(key, async () => {
     ensureIrctcConfigured();
     const response: any = await callWithRetry(
@@ -329,7 +350,7 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
       ...(response && typeof response === 'object' && !Array.isArray(response) ? response : {}),
       provider: response?.provider || 'irctc-connect',
     };
-  }, AVAILABILITY_CACHE_TTL_MS);
+  }, dynamicTtl);
 }
 
 
