@@ -284,10 +284,15 @@ export function TrainResultsWorkspace() {
         return trainName.includes(query) || trainNo.includes(query);
       });
     }
+    const isExplicitlyUnbookable = (availText: string) => {
+      if (!availText) return false;
+      const status = availText.toUpperCase();
+      return /NOT BOOKABLE|NOT RUNNING|CLASS NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|UNAVAILABLE/.test(status) && !/CHECK|TAP/.test(status);
+    };
     unverified = unverified.filter((train) => {
       const reqClass = selectedSortClass || primaryClassCode(train);
       const availText = train?.classAvailability?.[reqClass]?.[0]?.text || train?.classAvailability?.[reqClass]?.[0]?.availabilityText || train?.availability;
-      return !isUnavailableRailStatus(availText);
+      return !isExplicitlyUnbookable(availText);
     });
     const sortedUnverified = [...unverified].sort((a, b) => {
       const fareA = selectedSortClass ? classFareAmount(a, selectedSortClass) : trainFareAmount(a);
@@ -316,12 +321,17 @@ export function TrainResultsWorkspace() {
         return l1Name.includes(query) || l1No.includes(query) || l2Name.includes(query) || l2No.includes(query);
       });
     }
+    const isExplicitlyUnbookable = (availText: string) => {
+      if (!availText) return false;
+      const status = availText.toUpperCase();
+      return /NOT BOOKABLE|NOT RUNNING|CLASS NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|UNAVAILABLE/.test(status) && !/CHECK|TAP/.test(status);
+    };
     unverified = unverified.filter((split) => {
       const l1Class = selectedSortClass || primaryClassCode(split.leg1);
       const l2Class = selectedSortClass || primaryClassCode(split.leg2);
       const avail1 = split.leg1?.classAvailability?.[l1Class]?.[0]?.text || split.leg1?.classAvailability?.[l1Class]?.[0]?.availabilityText || split.leg1?.availability;
       const avail2 = split.leg2?.classAvailability?.[l2Class]?.[0]?.text || split.leg2?.classAvailability?.[l2Class]?.[0]?.availabilityText || split.leg2?.availability;
-      return !isUnavailableRailStatus(avail1) && !isUnavailableRailStatus(avail2);
+      return !isExplicitlyUnbookable(avail1) && !isExplicitlyUnbookable(avail2);
     });
     const sortedUnverified = [...unverified].sort((a, b) => {
       if (sortBy === "lowestLayover") return splitLayoverMinutes(a) - splitLayoverMinutes(b);
@@ -340,7 +350,7 @@ export function TrainResultsWorkspace() {
         (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
     });
 
-    return [...verified, ...sortedUnverified].slice(0, 10);
+    return [...verified, ...sortedUnverified].slice(0, 15);
   }, [filteredSplits, state.splits, sortBy, selectedSortClass, searchQuery]);
 
   const filteredMultiSplits = useMemo(() => {
