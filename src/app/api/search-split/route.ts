@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       coverageMode,
       exactStationOnly: false,
       providerPairLimit: 20,
-      maxSplitHubs: 50,
+      maxSplitHubs: 15,
       maxSplitLegOptions: 60,
       maxSplitCandidates: 400,
       maxSplitResults: 15,
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       maxMultiCandidates: 0,
       maxMultiResults: 0,
       plannerLegTimeoutMs: 4500,
-      globalTimeoutMs: 12000,
+      globalTimeoutMs: 18000,
     } as const;
 
     const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);
