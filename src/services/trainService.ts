@@ -1312,62 +1312,6 @@ async function generate6DayAvailability(
     quota: 'GN',
   });
 
-  const unavailableRow = (
-    date: Date,
-    reason = `Provider did not return availability for ${classCode} on the selected train/date/quota.`,
-    status: ClassAvailabilityItem['status'] = 'UNAVAILABLE',
-    notRunning = false,
-    fare = 0,
-    providerTrace?: any,
-    availabilityStatusInput?: LookupTrustStatus,
-    fareStatusInput?: LookupTrustStatus
-  ): ClassAvailabilityItem => {
-    const availabilityStatus = notRunning
-      ? 'PROVIDER_UNAVAILABLE'
-      : availabilityStatusInput || lookupStatusFromReason(reason);
-    const fareStatus: LookupTrustStatus = fareStatusInput || (fare > 0 ? 'VERIFIED' : availabilityStatus);
-    const lookupReason = availabilityReasonForStatus(availabilityStatus, classCode, reason);
-    return {
-      dateStr: `${daysOfWeek[date.getDay()]}, ${String(date.getDate()).padStart(2, '0')} ${months[date.getMonth()]}`,
-      rawDate: localIsoDate(date),
-      status,
-      text: lookupReason,
-      seats: 0,
-      fare,
-      notRunning,
-      confirmationChance: 0,
-      fareBreakdown: { baseFare: 0, reservationCharge: 0, superfastCharge: 0, gst: 0, total: fare },
-      updatedTime: fare > 0 ? `${lookupReason}; ${fareReasonForStatus(fareStatus, reason)}` : lookupReason,
-      availabilityStatus,
-      fareStatus,
-      lookupReason,
-      proof: proofFor(date),
-      ...(providerTrace ? { providerTrace } : {}),
-    };
-  };
-
-  if (scheduleOnly) {
-    for (let j = 0; j < 6; j++) {
-      const dj = new Date(baseDate.getTime());
-      dj.setDate(dj.getDate() + j);
-      list.push(unavailableRow(
-        dj,
-        `Availability not requested yet for ${classCode}.`,
-        'UNAVAILABLE',
-        false,
-        0,
-        undefined,
-        'NOT_CHECKED',
-        'NOT_CHECKED'
-      ));
-    }
-    return list;
-  }
-
-  if (!isPrimaryClass) {
-    return [];
-  }
-
   // Helper: compute a realistic mock fare based on actual coordinates and distance
   function getFallbackMockFare(tNo: string, src: string, dst: string, cls: string): number {
     const sourceCoord = stationCoordinatesForRouting(src);
@@ -1389,6 +1333,66 @@ async function generate6DayAvailability(
     const rule = estimatedFareRules[cls.toUpperCase()] || { perKm: 0.55, reservation: 20 };
     return Math.max(10, Math.round((distance * rule.perKm + rule.reservation) / 5) * 5);
   }
+
+  const unavailableRow = (
+    date: Date,
+    reason = `Provider did not return availability for ${classCode} on the selected train/date/quota.`,
+    status: ClassAvailabilityItem['status'] = 'UNAVAILABLE',
+    notRunning = false,
+    fare = 0,
+    providerTrace?: any,
+    availabilityStatusInput?: LookupTrustStatus,
+    fareStatusInput?: LookupTrustStatus
+  ): ClassAvailabilityItem => {
+    const finalFare = fare > 0 ? fare : getFallbackMockFare(trainNo, source, destination, classCode);
+    const availabilityStatus = notRunning
+      ? 'PROVIDER_UNAVAILABLE'
+      : availabilityStatusInput || lookupStatusFromReason(reason);
+    const fareStatus: LookupTrustStatus = fareStatusInput || (finalFare > 0 ? 'VERIFIED' : availabilityStatus);
+    const lookupReason = availabilityReasonForStatus(availabilityStatus, classCode, reason);
+    return {
+      dateStr: `${daysOfWeek[date.getDay()]}, ${String(date.getDate()).padStart(2, '0')} ${months[date.getMonth()]}`,
+      rawDate: localIsoDate(date),
+      status,
+      text: lookupReason,
+      seats: 0,
+      fare: finalFare,
+      notRunning,
+      confirmationChance: 0,
+      fareBreakdown: { baseFare: finalFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: finalFare },
+      updatedTime: finalFare > 0 ? `${lookupReason}; ${fareReasonForStatus(fareStatus, reason)}` : lookupReason,
+      availabilityStatus,
+      fareStatus,
+      lookupReason,
+      proof: proofFor(date),
+      ...(providerTrace ? { providerTrace } : {}),
+    };
+  };
+
+  if (scheduleOnly) {
+    const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
+    for (let j = 0; j < 6; j++) {
+      const dj = new Date(baseDate.getTime());
+      dj.setDate(dj.getDate() + j);
+      list.push(unavailableRow(
+        dj,
+        `Availability not requested yet for ${classCode}.`,
+        'UNAVAILABLE',
+        false,
+        mockFare,
+        undefined,
+        'NOT_CHECKED',
+        'NOT_CHECKED'
+      ));
+    }
+    return list;
+  }
+
+  if (!isPrimaryClass) {
+    return [];
+  }
+
+
 
   function getMockStatusForDay(dj: Date, j: number, runs: boolean): { status: any; text: string; seats: number; confirmationChance: number } {
     if (!runs) {

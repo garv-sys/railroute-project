@@ -606,13 +606,21 @@ function TrainResultCard({
   onFavorite: (train: any) => void;
   favorite: boolean;
 }) {
-	  const [expanded, setExpanded] = useState(false);
-	  const availability = firstAvailability(train, classType);
-	  const status = availability?.text ?? train.availability ?? "Provider did not return verified availability";
-	  const fare = availability?.fare ? `₹${availability.fare}` : "Live fare unavailable";
+  const [expanded, setExpanded] = useState(false);
+  const availability = firstAvailability(train, classType);
+  const status = availability?.text ?? train.availability ?? "Checking availability...";
+  const liveFare = availability?.fare
+    ? `₹${Number(availability.fare).toLocaleString("en-IN")}`
+    : train.fare && train.fare !== "--"
+    ? train.fare
+    : null;
   const delay = deterministicDelay(train.trainNo);
   const confidence = confidenceFor(train);
   const isSplit = Boolean(train.legs);
+
+  // Build class-wise fare+availability from classAvailability map
+  const classEntries = Object.entries(train.classAvailability || {}) as [string, any[]][];
+  const hasClassData = classEntries.length > 0;
 
   return (
     <motion.article
@@ -629,6 +637,11 @@ function TrainResultCard({
             </span>
             <span className={`rounded-full border px-2.5 py-1 text-[11px] font-black ${delay.tone}`}>{delay.label}</span>
             <span className="rounded-full border border-white/10 bg-white/8 px-2.5 py-1 text-[11px] font-black text-slate-300">{confidence}% reliability</span>
+            {liveFare && (
+              <span className="rounded-full border border-emerald-300/40 bg-emerald-400/12 px-2.5 py-1 text-[11px] font-black text-emerald-100">
+                {liveFare}
+              </span>
+            )}
           </div>
 
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -660,6 +673,7 @@ function TrainResultCard({
             <div>
               <div className="text-3xl font-black text-white">{train.departureTime || "--:--"}</div>
               <div className="mt-1 text-xs font-black uppercase text-emerald-200">{stationLabelFromCode(train.source)}</div>
+              <div className="mt-0.5 text-[10px] font-bold text-slate-500">{train.source}</div>
             </div>
             <div className="flex min-w-28 flex-col items-center">
               <span className="text-xs font-black text-slate-400">{train.duration || "N/A"}</span>
@@ -672,11 +686,12 @@ function TrainResultCard({
                   <Train className="h-2.5 w-2.5" />
                 </motion.span>
               </div>
-              <span className="text-[11px] font-semibold text-slate-500">Route preview</span>
+              <span className="text-[11px] font-semibold text-slate-500">Direct route</span>
             </div>
             <div className="text-right">
               <div className="text-3xl font-black text-white">{train.arrivalTime || "--:--"}</div>
               <div className="mt-1 text-xs font-black uppercase text-rose-200">{stationLabelFromCode(train.destination)}</div>
+              <div className="mt-0.5 text-[10px] font-bold text-slate-500">{train.destination}</div>
             </div>
           </div>
 
@@ -705,14 +720,42 @@ function TrainResultCard({
           </div>
         </div>
 
-        <div className="w-full rounded-3xl border border-white/10 bg-white/8 p-4 lg:w-64">
+        {/* Right panel: fare + availability */}
+        <div className="w-full rounded-3xl border border-white/10 bg-white/8 p-4 lg:w-72">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-[11px] font-black uppercase text-slate-500">Fare preview</div>
-              <div className="mt-1 text-3xl font-black text-white">{fare}</div>
+              <div className="text-[11px] font-black uppercase text-slate-500">Live Fare</div>
+              <div className="mt-1 text-3xl font-black text-white">
+                {liveFare ?? <span className="text-lg text-slate-400">Fetching…</span>}
+              </div>
+              {train.classType && (
+                <div className="mt-1 text-[10px] font-bold text-slate-500">{train.classType} class</div>
+              )}
             </div>
             <span className={`rounded-full border px-2.5 py-1 text-[11px] font-black ${statusTone(status)}`}>{status}</span>
           </div>
+
+          {/* Class-wise availability grid */}
+          {hasClassData && (
+            <div className="mt-4 space-y-1.5">
+              <div className="text-[10px] font-black uppercase text-slate-500 mb-2">All Classes · Live</div>
+              {classEntries.slice(0, 6).map(([cls, rows]) => {
+                const row0 = Array.isArray(rows) ? rows[0] : null;
+                const clsFare = row0?.fare ? `₹${Number(row0.fare).toLocaleString("en-IN")}` : "—";
+                const clsStatus = row0?.text || "—";
+                return (
+                  <div key={cls} className="flex items-center justify-between rounded-xl border border-white/8 bg-white/5 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-black text-cyan-200 w-8">{cls}</span>
+                      <span className={`text-[10px] font-bold truncate max-w-[90px] ${statusTone(clsStatus).split(" ").pop()}`}>{clsStatus}</span>
+                    </div>
+                    <span className="text-[11px] font-black text-white shrink-0">{clsFare}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
             <div className="h-full rounded-full bg-gradient-to-r from-emerald-300 via-cyan-300 to-indigo-300" style={{ width: `${confidence}%` }} />
           </div>
@@ -722,7 +765,7 @@ function TrainResultCard({
             onClick={() => setExpanded((value) => !value)}
             className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/8 px-4 py-3 text-sm font-black text-white transition hover:bg-white/12"
           >
-            Route details
+            All Stations & Details
             <ChevronDown className={`h-4 w-4 transition ${expanded ? "rotate-180" : ""}`} />
           </button>
         </div>
@@ -736,9 +779,9 @@ function TrainResultCard({
             exit={{ height: 0, opacity: 0 }}
             className="border-t border-white/10 bg-black/16"
           >
-            <div className="grid gap-4 p-5 lg:grid-cols-[1fr_280px]">
+            <div className="grid gap-4 p-5 lg:grid-cols-[1fr_300px]">
               <StationTimeline train={train} />
-              <CoachPreview classType={classType === "Any" ? train.classType || "3A" : classType} availability={status} />
+              <ClassAvailabilityPanel train={train} classType={classType} />
             </div>
           </motion.div>
         )}
@@ -748,36 +791,318 @@ function TrainResultCard({
 }
 
 function StationTimeline({ train }: { train: any }) {
-  const source = train.source || "JP";
-  const destination = train.destination || "PNBE";
-  const stationsList = [source, destination];
+  const [schedule, setSchedule] = useState<any[] | null>(null);
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
+
+  useEffect(() => {
+    if (!train.trainNo) return;
+    setLoadingSchedule(true);
+    postJson<any>("/api/schedule", { trainNo: train.trainNo })
+      .then((data) => {
+        const stops =
+          data?.data?.route ||
+          data?.data?.stations ||
+          data?.route ||
+          data?.stations ||
+          null;
+        setSchedule(Array.isArray(stops) ? stops : null);
+      })
+      .catch(() => setSchedule(null))
+      .finally(() => setLoadingSchedule(false));
+  }, [train.trainNo]);
+
+  // If we have real schedule stops, show them; otherwise fall back to source/dest
+  const stops: Array<{ code: string; name: string; arrival: string; departure: string; day?: number; distance?: number; platform?: string }> =
+    schedule && schedule.length > 0
+      ? schedule.map((s: any) => ({
+          code: s.station_code || s.stnCode || s.code || "",
+          name: s.station_name || s.stnName || s.name || s.station_code || s.code || "",
+          arrival: s.arrival || s.arr_time || s.arrivalTime || "--:--",
+          departure: s.departure || s.dep_time || s.departureTime || "--:--",
+          day: s.day || s.dayCount || 1,
+          distance: s.distance || s.km || undefined,
+          platform: s.platform || undefined,
+        }))
+      : [
+          { code: train.source, name: stationLabelFromCode(train.source), arrival: "--", departure: train.departureTime || "--", day: 1 },
+          { code: train.destination, name: stationLabelFromCode(train.destination), arrival: train.arrivalTime || "--", departure: "--", day: 1 },
+        ];
 
   return (
     <div>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h4 className="text-sm font-black uppercase text-white">Station timeline</h4>
-        <span className="rounded-full border border-white/10 px-3 py-1 text-[11px] font-black text-slate-400">ETA aware</span>
+        <h4 className="text-sm font-black uppercase text-white">Full Station Route</h4>
+        <div className="flex items-center gap-2">
+          {loadingSchedule && <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-300" />}
+          <span className="rounded-full border border-white/10 px-3 py-1 text-[11px] font-black text-slate-400">
+            {schedule ? `${stops.length} stops` : "Showing endpoints"}
+          </span>
+        </div>
       </div>
-      <div className="space-y-0">
-        {stationsList.map((code, index) => (
-          <div key={`${code}-${index}`} className="grid grid-cols-[auto_1fr_auto] gap-3">
-            <div className="flex flex-col items-center">
-              <span className={`flex h-7 w-7 items-center justify-center rounded-full border ${index === 0 ? "border-emerald-300 bg-emerald-300/16 text-emerald-100" : index === stationsList.length - 1 ? "border-rose-300 bg-rose-300/16 text-rose-100" : "border-cyan-300/50 bg-cyan-300/12 text-cyan-100"}`}>
-                <Circle className="h-2.5 w-2.5 fill-current" />
+      <div className="max-h-96 overflow-y-auto space-y-0 pr-1">
+        {stops.map((stop, index) => {
+          const isFirst = index === 0;
+          const isLast = index === stops.length - 1;
+          const isSource = stop.code === train.source;
+          const isDest = stop.code === train.destination;
+          return (
+            <div key={`${stop.code}-${index}`} className="grid grid-cols-[auto_1fr_auto] gap-3">
+              <div className="flex flex-col items-center">
+                <span
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[10px] font-black ${
+                    isSource || isFirst
+                      ? "border-emerald-300 bg-emerald-300/16 text-emerald-100"
+                      : isDest || isLast
+                      ? "border-rose-300 bg-rose-300/16 text-rose-100"
+                      : "border-cyan-300/30 bg-cyan-300/8 text-cyan-200"
+                  }`}
+                >
+                  {stop.day && stop.day > 1 ? `D${stop.day}` : index + 1}
+                </span>
+                {index < stops.length - 1 && <span className="w-px flex-1 bg-white/10 my-0.5" style={{ minHeight: "20px" }} />}
+              </div>
+              <div className="pb-3">
+                <div className="text-sm font-black text-white leading-tight">{stop.name}</div>
+                <div className="mt-0.5 flex items-center gap-2 text-[10px] font-semibold text-slate-500">
+                  <span className="font-black text-slate-400">{stop.code}</span>
+                  {stop.platform && <span>· Platform {stop.platform}</span>}
+                  {stop.distance && <span>· {stop.distance} km</span>}
+                </div>
+              </div>
+              <div className="text-right pb-3">
+                {isSource || isFirst ? (
+                  <div className="text-sm font-black text-emerald-300">{stop.departure}</div>
+                ) : isDest || isLast ? (
+                  <div className="text-sm font-black text-rose-300">{stop.arrival}</div>
+                ) : (
+                  <div>
+                    <div className="text-xs font-bold text-slate-300">{stop.arrival}</div>
+                    <div className="text-[10px] text-slate-500">{stop.departure}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ClassAvailabilityPanel({ train, classType }: { train: any; classType: string }) {
+  const classEntries = Object.entries(train.classAvailability || {}) as [string, any[]][];
+  const allClasses = train.classes || ["SL", "3A", "2A", "1A"];
+
+  const activeClass = classType !== "Any" ? classType : train.classType || allClasses[0];
+  const availability = firstAvailability(train, classType);
+  const status = availability?.text ?? train.availability ?? "—";
+
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/7 p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-black uppercase text-white">Class Availability</h4>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Live seat status · all classes</p>
+        </div>
+        <span className={`rounded-full border px-2 py-1 text-[10px] font-black ${statusTone(status)}`}>{status}</span>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {(classEntries.length > 0 ? classEntries : allClasses.map((cls: string) => [cls, []])).map(([cls, rows]: [string, any[]]) => {
+          const row0 = Array.isArray(rows) ? rows[0] : null;
+          const clsFare = row0?.fare ? `₹${Number(row0.fare).toLocaleString("en-IN")}` : null;
+          const clsText = row0?.text || "—";
+          const isActive = cls === activeClass;
+          return (
+            <div
+              key={cls}
+              className={`rounded-2xl border p-3 transition ${
+                isActive
+                  ? "border-cyan-300/40 bg-cyan-300/10"
+                  : "border-white/8 bg-white/5"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-black ${isActive ? "text-cyan-200" : "text-slate-300"}`}>{cls}</span>
+                  {isActive && <span className="text-[9px] font-black text-cyan-400 bg-cyan-400/10 rounded-full px-1.5 py-0.5">SELECTED</span>}
+                </div>
+                {clsFare && <span className="text-sm font-black text-white">{clsFare}</span>}
+              </div>
+              <div className={`mt-1 text-[11px] font-bold ${statusTone(clsText).split(" ").pop()}`}>{clsText}</div>
+              {row0?.seats !== undefined && row0.seats !== null && (
+                <div className="mt-1 text-[10px] font-semibold text-slate-500">{row0.seats} seats</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {["Available", "RAC", "WL"].map((label) => (
+          <div key={label} className="rounded-xl border border-white/8 bg-white/5 p-2 text-center">
+            <div className={`text-[10px] font-black ${
+              label === "Available" ? "text-emerald-300" : label === "RAC" ? "text-amber-300" : "text-orange-300"
+            }`}>{label}</div>
+            <div className="mt-0.5 text-[10px] text-slate-500">Live</div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-[10px] font-semibold leading-5 text-slate-500">Final berth allocation is controlled by IRCTC charting. Live data subject to API availability.</p>
+    </div>
+  );
+}
+
+const CKP_ROUTES = [
+  {
+    id: "ckp-udz",
+    from: "CKP",
+    to: "UDZ",
+    fromLabel: "Chakradharpur",
+    toLabel: "Udaipur City",
+    fromState: "Jharkhand",
+    toState: "Rajasthan",
+    approxDuration: "~24h",
+    highlight: "Scenic Rajasthan route",
+    color: "from-amber-500/20 to-orange-600/20",
+    borderColor: "border-amber-400/30",
+    badgeColor: "text-amber-200 border-amber-300/30 bg-amber-400/10",
+  },
+  {
+    id: "ckp-awr",
+    from: "CKP",
+    to: "AWR",
+    fromLabel: "Chakradharpur",
+    toLabel: "Alwar",
+    fromState: "Jharkhand",
+    toState: "Rajasthan",
+    approxDuration: "~20h",
+    highlight: "Tiger reserve gateway",
+    color: "from-emerald-500/20 to-teal-600/20",
+    borderColor: "border-emerald-400/30",
+    badgeColor: "text-emerald-200 border-emerald-300/30 bg-emerald-400/10",
+  },
+  {
+    id: "ckp-ju",
+    from: "CKP",
+    to: "JU",
+    fromLabel: "Chakradharpur",
+    toLabel: "Jodhpur Jn",
+    fromState: "Jharkhand",
+    toState: "Rajasthan",
+    approxDuration: "~26h",
+    highlight: "Blue City express corridor",
+    color: "from-blue-500/20 to-indigo-600/20",
+    borderColor: "border-blue-400/30",
+    badgeColor: "text-blue-200 border-blue-300/30 bg-blue-400/10",
+  },
+];
+
+function CKPRoutesExplorer({
+  onSelectRoute,
+}: {
+  onSelectRoute: (from: string, to: string) => void;
+}) {
+  return (
+    <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6">
+      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-black uppercase text-cyan-100">
+            <Zap className="h-3 w-3" />
+            CKP Route Explorer
+          </span>
+          <h2 className="mt-3 text-3xl font-black text-white sm:text-4xl">
+            Chakradharpur Corridors
+          </h2>
+          <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-slate-400">
+            Explore live trains from <strong className="text-white">Chakradharpur (CKP)</strong> to major Rajasthan destinations — Udaipur, Alwar, and Jodhpur. Click any route to load real-time trains, fares, and seat availability.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/6 px-4 py-2">
+          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-xs font-black text-emerald-200">Live data</span>
+        </div>
+      </div>
+
+      <div className="grid gap-5 md:grid-cols-3">
+        {CKP_ROUTES.map((route) => (
+          <motion.button
+            key={route.id}
+            type="button"
+            onClick={() => onSelectRoute(route.from, route.to)}
+            whileHover={{ scale: 1.025, y: -3 }}
+            whileTap={{ scale: 0.97 }}
+            className={`group relative overflow-hidden rounded-[28px] border ${route.borderColor} bg-gradient-to-br ${route.color} p-6 text-left shadow-2xl shadow-black/30 backdrop-blur-xl transition`}
+          >
+            {/* Animated shimmer */}
+            <div className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/6 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/12 bg-white/10">
+                <Train className="h-6 w-6 text-white" />
+              </div>
+              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-black ${route.badgeColor}`}>
+                {route.approxDuration}
               </span>
-              {index < stationsList.length - 1 && <span className="h-12 w-px bg-white/12" />}
             </div>
-            <div className="pb-5">
-              <div className="text-sm font-black text-white">{stationLabelFromCode(code)}</div>
-              <div className="mt-1 text-xs font-semibold text-slate-500">{index === 0 ? "Departure" : index === stationsList.length - 1 ? "Arrival" : "Platform shown only if provider returns it"}</div>
+
+            <div className="space-y-3">
+              {/* From */}
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-300/40 bg-emerald-400/12">
+                  <MapPin className="h-3.5 w-3.5 text-emerald-300" />
+                </div>
+                <div>
+                  <div className="text-base font-black text-white">{route.fromLabel}</div>
+                  <div className="text-[10px] font-bold text-slate-400">{route.fromState} · <span className="text-cyan-300">{route.from}</span></div>
+                </div>
+              </div>
+
+              {/* Arrow */}
+              <div className="ml-3.5 flex items-center gap-2">
+                <div className="w-px h-4 bg-white/20" />
+                <ArrowRight className="h-4 w-4 text-slate-400 ml-1" />
+              </div>
+
+              {/* To */}
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full border border-rose-300/40 bg-rose-400/12">
+                  <MapPin className="h-3.5 w-3.5 text-rose-300" />
+                </div>
+                <div>
+                  <div className="text-base font-black text-white">{route.toLabel}</div>
+                  <div className="text-[10px] font-bold text-slate-400">{route.toState} · <span className="text-rose-300">{route.to}</span></div>
+                </div>
+              </div>
             </div>
-            <div className="text-right text-sm font-black text-slate-300">
-              {index === 0 ? train.departureTime : index === stationsList.length - 1 ? train.arrivalTime : `${(parseTimeMinutes(train.departureTime) / 60 + index * 4 + 6).toFixed(0).padStart(2, "0")}:15`}
+
+            <div className="mt-5 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-400">{route.highlight}</span>
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/12 bg-white/10 text-white transition group-hover:bg-white/20">
+                <Search className="h-4 w-4" />
+              </span>
+            </div>
+          </motion.button>
+        ))}
+      </div>
+
+      {/* Route stats bar */}
+      <div className="mt-6 grid grid-cols-3 gap-4 rounded-[24px] border border-white/8 bg-white/5 p-5 backdrop-blur-xl">
+        {[
+          { label: "CKP → UDZ", sub: "Via Ratlam / Nagda", icon: Route },
+          { label: "CKP → AWR", sub: "Via Delhi / Mathura", icon: Route },
+          { label: "CKP → JU", sub: "Via Jaipur / Ajmer", icon: Route },
+        ].map(({ label, sub, icon: Icon }) => (
+          <div key={label} className="flex items-center gap-3">
+            <Icon className="h-4 w-4 text-cyan-300 shrink-0" />
+            <div>
+              <div className="text-sm font-black text-white">{label}</div>
+              <div className="text-[10px] font-semibold text-slate-500">{sub}</div>
             </div>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1629,6 +1954,21 @@ export function RailRouteSuperApp() {
         </div>
       </section>
 
+      <CKPRoutesExplorer
+        onSelectRoute={(from, to) => {
+          const fromSt = stationByCode(from);
+          const toSt = stationByCode(to);
+          setSource(from);
+          setDestination(to);
+          if (fromSt) setSourceQuery(stationLabel(fromSt));
+          if (toSt) setDestinationQuery(stationLabel(toSt));
+          window.setTimeout(() => {
+            document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            runSearch();
+          }, 80);
+        }}
+      />
+
       <section className="relative z-10 mx-auto max-w-7xl px-4 py-8 sm:px-6">
         <div className="grid gap-4 lg:grid-cols-4">
           {[
@@ -2093,6 +2433,21 @@ export function RailRouteSearchWorkspace({
           ))}
         </div>
       </section>
+
+      <CKPRoutesExplorer
+        onSelectRoute={(from, to) => {
+          const fromSt = stationByCode(from);
+          const toSt = stationByCode(to);
+          setSource(from);
+          setDestination(to);
+          if (fromSt) setSourceQuery(stationLabel(fromSt));
+          if (toSt) setDestinationQuery(stationLabel(toSt));
+          window.setTimeout(() => {
+            runSearch();
+            document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 80);
+        }}
+      />
 
       <section className="relative z-10 mx-auto max-w-7xl px-4 py-4 sm:px-6">
         <div className="grid gap-4 lg:grid-cols-4">

@@ -1,0 +1,14 @@
+{
+  "id": "session-1781882744137",
+  "startedAt": "2026-06-19T15:25:44.137Z",
+  "cwd": "/Users/garvtandon/hehe",
+  "context": {},
+  "metrics": {
+    "edits": 0,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  },
+  "endedAt": "2026-06-19T15:39:24.383Z",
+  "duration": 820246
+}
