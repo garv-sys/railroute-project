@@ -1161,6 +1161,8 @@ const STRATEGIC_SPLIT_HUBS = [
   'KOTA', 'SWM', 'JP', 'GADJ', 'FL', 'AII',
 ];
 
+const DELHI_SPLIT_HUBS = ['NDLS', 'DLI', 'NZM', 'ANVT'];
+
 const HUB_IMPORTANCE: Record<string, number> = {
   NDLS: 100, DLI: 96, NZM: 94, ANVT: 88, DEE: 82,
   CNB: 96, PRYJ: 95, ALD: 90, DDU: 94, MGS: 88, BSB: 86, BSBS: 78,
@@ -1345,6 +1347,24 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
   };
   
   filteredCandidates.sort((a, b) => getHubScore(a) - getHubScore(b));
+
+  const shouldPinDelhi = directDistance >= 450 &&
+    !terminalClusterFor(normalizedSource).some((code) => DELHI_SPLIT_HUBS.includes(code)) &&
+    !terminalClusterFor(normalizedDest).some((code) => DELHI_SPLIT_HUBS.includes(code));
+  if (shouldPinDelhi) {
+    const pinnedDelhi = DELHI_SPLIT_HUBS.filter((code) => filteredCandidates.includes(code));
+    const nonDelhi = filteredCandidates.filter((code) => !pinnedDelhi.includes(code));
+    filteredCandidates.splice(
+      0,
+      filteredCandidates.length,
+      ...Array.from(new Set([
+        preferred,
+        ...nonDelhi.slice(0, 4),
+        ...pinnedDelhi,
+        ...nonDelhi.slice(4),
+      ].filter(Boolean)))
+    );
+  }
   
   return takeForCoverage(filteredCandidates, limit);
 }

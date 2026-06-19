@@ -758,7 +758,7 @@ export function TrainResultsWorkspace() {
           deferred: current.deferred,
         }));
 
-        for (const target of targets) {
+        const hydrateTarget = async (target: (typeof targets)[number]) => {
           if (requestId !== searchRequestId.current || hydrationId !== liveHydrationGeneration.current) return;
           setLiveHydration((current) => ({ ...current, current: `${target.train.trainNo} ${target.classCode}` }));
 
@@ -821,8 +821,15 @@ export function TrainResultsWorkspace() {
 	            done: Math.min(current.total, current.done + 1),
 	            rateLimited: current.rateLimited + (rateLimited ? 1 : 0),
 	          }));
+        };
 
-            await new Promise((resolve) => setTimeout(resolve, 250));
+        const liveBatchSize = 3;
+        for (let i = 0; i < targets.length; i += liveBatchSize) {
+          if (requestId !== searchRequestId.current || hydrationId !== liveHydrationGeneration.current) return;
+          await Promise.all(targets.slice(i, i + liveBatchSize).map(hydrateTarget));
+          if (i + liveBatchSize < targets.length) {
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          }
         }
 
         if (requestId === searchRequestId.current && hydrationId === liveHydrationGeneration.current) {
@@ -2876,4 +2883,3 @@ export function MultiSplitJourneyCard({
     </article>
   );
 }
-
