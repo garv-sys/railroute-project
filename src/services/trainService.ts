@@ -2567,8 +2567,8 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	                      ? 8.0
 	                      : 6.0;
 
-                // LAYOVER WINDOW: 1h to maxLayover for optimal transition
-                if (layoverHours >= 0.75 && layoverHours <= maxLayover) {
+                // LAYOVER WINDOW: 5h to 15h as requested by the user
+                if (layoverHours >= 5.0 && layoverHours <= 15.0) {
                   potentialRoutes.push({
                     hub,
 	                    t1,
@@ -2778,10 +2778,8 @@ export async function findSmartRoutes(source: string, dest: string, date: string
           if (isMajorHub) {
             optimizedScore += 10;
           }
-          if (route.layoverHours > 3) {
-            optimizedScore -= (route.layoverHours - 3) * (isMajorHub ? 8 : 15);
-          } else if (route.layoverHours < 1.5) {
-            optimizedScore -= (1.5 - route.layoverHours) * 10;
+          if (route.layoverHours > 5.0) {
+            optimizedScore -= (route.layoverHours - 5.0) * 3;
           } else {
             optimizedScore += 5;
           }

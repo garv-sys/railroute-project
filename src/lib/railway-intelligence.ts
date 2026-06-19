@@ -98,6 +98,29 @@ function ensureStationsInitialized() {
       .map((station) => [station.code, { lat: Number(station.lat), lng: Number(station.lon) }])
   );
 
+  try {
+    const MAJOR_HUBS = require("@/data/major_hubs.json");
+    for (const hub of MAJOR_HUBS) {
+      const code = String(hub.code || "").toUpperCase();
+      if (!stationCoordsMap[code] && Number.isFinite(hub.lat) && Number.isFinite(hub.lon)) {
+        stationCoordsMap[code] = { lat: Number(hub.lat), lng: Number(hub.lon) };
+      }
+      if (!stationByCodeMap.has(code)) {
+        stationByCodeMap.set(code, {
+          code,
+          name: hub.name,
+          state: hub.state,
+          zone: hub.zone,
+          lat: hub.lat,
+          lon: hub.lon,
+          type: "junction"
+        });
+      }
+    }
+  } catch (e) {
+    console.error("Failed to load major hubs fallback coordinates:", e);
+  }
+
   stationAliasMap = new Map<string, string[]>();
 
   for (const [alias, codes] of Object.entries(COMMON_CITY_ALIASES)) {

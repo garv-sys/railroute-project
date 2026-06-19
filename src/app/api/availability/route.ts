@@ -93,6 +93,7 @@ export async function POST(request: Request) {
 	      status: result.data.status,
 	      seats: result.data.seats,
 	      fareSource: result.data.fareSource,
+	      fareExactRequest: result.data.fareExactRequest,
 	      exactDate: result.data.exactDate,
 	      reason: result.data.reason,
 	      availabilityStatus: result.data.availabilityStatus,
