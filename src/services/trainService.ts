@@ -1338,7 +1338,8 @@ async function generate6DayAvailability(
     availabilityStatusInput?: LookupTrustStatus,
     fareStatusInput?: LookupTrustStatus
   ): ClassAvailabilityItem => {
-    const finalFare = fare > 0 ? fare : getFallbackMockFare(trainNo, source, destination, classCode);
+    const isDemoMode = !process.env.IRCTC_API_KEY?.trim();
+    const finalFare = fare > 0 ? fare : (isDemoMode ? getFallbackMockFare(trainNo, source, destination, classCode) : 0);
     const availabilityStatus = notRunning
       ? 'PROVIDER_UNAVAILABLE'
       : availabilityStatusInput || lookupStatusFromReason(reason);

@@ -519,7 +519,8 @@ function SmartSearchPanel({
           <input
             type="date"
             value={date}
-            min={todayIso()}
+            min="2026-06-21"
+            max="2026-08-21"
             onChange={(event) => setDate(event.target.value)}
             className="h-12 w-full rounded-2xl border border-white/10 bg-white/8 px-4 text-sm font-bold text-white outline-none focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
           />
@@ -1685,6 +1686,8 @@ function LiveTrainIntelligence() {
             <input
               type="date"
               value={date}
+              min="2026-06-21"
+              max="2026-08-21"
               onChange={(event) => setDate(event.target.value)}
               className="h-13 w-full rounded-2xl border border-white/10 bg-white/8 px-4 text-sm font-bold text-white outline-none focus:border-emerald-300/60"
             />
@@ -2344,7 +2347,7 @@ function LandingSearchCard() {
       <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
         <div>
           <label className="mb-2 block text-[11px] font-black uppercase text-slate-400">Travel Date</label>
-          <input type="date" min={todayIso()} value={date} onChange={(event) => setDate(event.target.value)} className="h-13 w-full rounded-2xl border border-white/10 bg-white/8 px-4 text-sm font-bold text-white outline-none focus:border-cyan-300/60" />
+          <input type="date" min="2026-06-21" max="2026-08-21" value={date} onChange={(event) => setDate(event.target.value)} className="h-13 w-full rounded-2xl border border-white/10 bg-white/8 px-4 text-sm font-bold text-white outline-none focus:border-cyan-300/60" />
         </div>
         <div>
           <label className="mb-2 block text-[11px] font-black uppercase text-slate-400">Train Class</label>

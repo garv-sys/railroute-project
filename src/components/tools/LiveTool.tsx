@@ -138,7 +138,7 @@ export function LiveTool() {
       <p className="mt-2 text-sm font-semibold text-slate-500 dark:text-slate-400">Shows provider running-status data when returned. If the provider is unavailable, no location is inferred.</p>
       <form onSubmit={check} className="mt-5 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
         <input value={trainNo} onChange={(event) => setTrainNo(event.target.value.replace(/\D/g, "").slice(0, 5))} placeholder="Train no, e.g. 12395" className="h-13 rounded-2xl border border-slate-200 bg-white px-4 font-bold dark:border-white/10 dark:bg-white/8 dark:text-white" />
-        <input value={date} onChange={(event) => setDate(event.target.value)} type="date" className="h-13 rounded-2xl border border-slate-200 bg-white px-4 font-bold dark:border-white/10 dark:bg-white/8 dark:text-white" />
+        <input value={date} onChange={(event) => setDate(event.target.value)} type="date" min="2026-06-21" max="2026-08-21" className="h-13 rounded-2xl border border-slate-200 bg-white px-4 font-bold dark:border-white/10 dark:bg-white/8 dark:text-white" />
         <button type="submit" disabled={state.loading} className="flex h-13 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-6 font-black text-white disabled:opacity-70 dark:bg-white dark:text-slate-950">
           {state.loading && <Loader2 className="h-4 w-4 animate-spin" />}
           <span>{state.loading ? "Checking" : "Check status"}</span>

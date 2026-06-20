@@ -37,7 +37,7 @@ export function RouteScheduleCalendar({
   searchResultsTrains,
   searchResultsSplits,
 }: RouteScheduleCalendarProps) {
-  const [selectedCalendarDate, setSelectedCalendarDate] = useState(activeDate || "2026-06-22");
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(activeDate || "2026-06-21");
 
   // Validate O-D pair
   const hasValidRoute = source && destination && source !== destination;
@@ -315,7 +315,7 @@ export function RouteScheduleCalendar({
       // Calendar days
       for (let d = 1; d <= numDays; d++) {
         const dateStr = `${year}-${String(monthVal + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        const inRange = dateStr >= "2026-06-22" && dateStr <= "2026-08-22";
+        const inRange = dateStr >= "2026-06-21" && dateStr <= "2026-08-21";
         const schedule = inRange ? getScheduleForDate(dateStr) : { direct: [], splits: [] };
 
         days.push({
@@ -372,7 +372,7 @@ export function RouteScheduleCalendar({
                 60-Day Route Schedule Grid
               </h4>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Visualizing scheduled train counts for <span className="font-bold text-slate-700 dark:text-slate-300">{stationCompactLabel(source)}</span> → <span className="font-bold text-slate-700 dark:text-slate-300">{stationCompactLabel(destination)}</span> (June 22 to August 22, 2026).
+                Visualizing scheduled train counts for <span className="font-bold text-slate-700 dark:text-slate-300">{stationCompactLabel(source)}</span> → <span className="font-bold text-slate-700 dark:text-slate-300">{stationCompactLabel(destination)}</span> (June 21 to August 21, 2026).
               </p>
             </div>
             <div className="flex gap-4 text-xs font-bold text-slate-500 dark:text-slate-400">

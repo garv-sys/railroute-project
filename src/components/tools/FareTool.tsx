@@ -136,7 +136,7 @@ export function FareTool() {
         <StationAutocomplete label="To" placeholder="Station name or code" example="Jaipur / JP" value={destination} setValue={setDestination} query={destinationQuery} setQuery={setDestinationQuery} />
         <label className="block">
           <span className="mb-2 block text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">Date</span>
-          <input value={date} onChange={(event) => setDate(event.target.value)} type="date" className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 font-bold dark:border-white/10 dark:bg-white/8 dark:text-white" />
+          <input value={date} onChange={(event) => setDate(event.target.value)} type="date" min="2026-06-21" max="2026-08-21" className="h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 font-bold dark:border-white/10 dark:bg-white/8 dark:text-white" />
         </label>
         <button type="button" onClick={check} className="mt-5 flex h-14 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-6 font-black text-white dark:bg-white dark:text-slate-950">
           {state.loading && <Loader2 className="h-4 w-4 animate-spin" />}

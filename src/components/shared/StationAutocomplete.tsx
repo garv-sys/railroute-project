@@ -268,9 +268,9 @@ export function RelatedStationChips({
 
 export function DateQuickField({ date, setDate }: { date: string; setDate: (value: string) => void }) {
   const options = [
-    ["Today", todayIso(0)],
-    ["Tomorrow", todayIso(1)],
-    ["Day after", todayIso(2)],
+    ["June 21", "2026-06-21"],
+    ["July 21", "2026-07-21"],
+    ["August 21", "2026-08-21"],
   ];
 
   return (
@@ -279,7 +279,7 @@ export function DateQuickField({ date, setDate }: { date: string; setDate: (valu
         <span className="text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">Date</span>
         <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500">{prettyDateLabel(date)}</span>
       </span>
-      <input type="date" min={todayIso(0)} value={date} onChange={(event) => setDate(event.target.value)} className="h-13 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-950 outline-none focus:border-cyan-400 dark:border-white/10 dark:bg-white/8 dark:text-white" />
+      <input type="date" min="2026-06-21" max="2026-08-21" value={date} onChange={(event) => setDate(event.target.value)} className="h-13 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-950 outline-none focus:border-cyan-400 dark:border-white/10 dark:bg-white/8 dark:text-white" />
       <div className="mt-2 flex flex-wrap gap-2">
         {options.map(([label, value]) => (
           <button
