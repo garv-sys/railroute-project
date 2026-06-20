@@ -138,95 +138,40 @@ function unavailableResult(
   rawProviderResponse?: any,
   partial: { fare?: number; providerFare?: any; rawAvailabilityRows?: any[]; exactDate?: boolean } = {}
 ): AvailabilityServiceResult {
-  const apiKey = process.env.IRCTC_API_KEY?.trim() || "";
-  
-  if (apiKey) {
-    const status = lookupStatusFromReason(reason);
-    const proof = makeLookupProof(params);
-    const availabilityText = availabilityReasonForStatus(status, params.classType, reason);
-    
-    return {
-      success: false,
-      provider,
-      rawProviderResponse,
-      meta: buildTrustMeta({
-        source: "fallback",
-        provider,
-        isLive: false,
-        fallback: true,
-        warning: reason,
-      }),
-      data: {
-        ...params,
-        availabilityText,
-        status: "UNAVAILABLE",
-        seats: null,
-        availabilitySource: "unavailable",
-        fare: null,
-        fareSource: "unavailable",
-        fareExactRequest: false,
-        exactDate: false,
-        availabilityStatus: status,
-        fareStatus: status,
-        lookupReason: reason,
-        proof,
-        reason,
-        provider,
-        rawAvailabilityRows: partial.rawAvailabilityRows || [],
-        providerFare: partial.providerFare || null,
-      },
-    };
-  }
-
-  // Generate high-fidelity mock fallback availability and fare!
-  const classCode = params.classType || "3A";
-  const mockFare = classCode === '1A' ? 2400 : classCode === '2A' ? 1400 : classCode === '3A' ? 1000 : classCode === '3E' ? 900 : classCode === 'SL' ? 450 : 250;
-  
-  const hash = (params.trainNo + params.date).split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const statuses = ['AVAILABLE-0042', 'AVAILABLE-0028', 'RAC-5', 'WL-12', 'AVAILABLE-0015', 'WL-3'];
-  const mockStatusText = statuses[hash % statuses.length];
-  
-  const mockStatus = mockStatusText.startsWith("AVAILABLE") 
-    ? "AVAILABLE" 
-    : mockStatusText.startsWith("RAC") 
-      ? "RAC" 
-      : "WL";
-  const mockSeats = mockStatus === "AVAILABLE" 
-    ? Number(mockStatusText.split("-")[1]) 
-    : 0;
-
+  const status = lookupStatusFromReason(reason);
   const proof = makeLookupProof(params);
-  const data: VerifiedAvailability = {
-    ...params,
-    availabilityText: mockStatusText,
-    status: mockStatus as any,
-    seats: mockSeats,
-    availabilitySource: "date-specific-provider",
-    fare: mockFare,
-    fareSource: "date-specific-provider",
-    fareExactRequest: true,
-    exactDate: true,
-    availabilityStatus: "VERIFIED",
-    fareStatus: "VERIFIED",
-    lookupReason: `Verified live (mock fallback: ${reason})`,
-    proof,
-    reason: `Provider error fallback: ${reason}`,
-    provider: `${provider} (mock fallback)`,
-    rawAvailabilityRows: [],
-    providerFare: null,
-  };
-
+  const availabilityText = availabilityReasonForStatus(status, params.classType, reason);
+  
   return {
-    success: true,
-    data,
-    provider: `${provider} (mock fallback)`,
+    success: false,
+    provider,
     rawProviderResponse,
     meta: buildTrustMeta({
-      source: "live",
-      provider: `${provider} (mock fallback)`,
-      isLive: true,
-      warning: `Provider check failed (${reason}), fell back to high-fidelity estimate.`,
+      source: "fallback",
+      provider,
+      isLive: false,
+      fallback: true,
+      warning: reason,
     }),
+    data: {
+      ...params,
+      availabilityText,
+      status: "UNAVAILABLE",
+      seats: null,
+      availabilitySource: "unavailable",
+      fare: null,
+      fareSource: "unavailable",
+      fareExactRequest: false,
+      exactDate: false,
+      availabilityStatus: status,
+      fareStatus: status,
+      lookupReason: reason,
+      proof,
+      reason,
+      provider,
+      rawAvailabilityRows: partial.rawAvailabilityRows || [],
+      providerFare: partial.providerFare || null,
+    },
   };
 }
 
@@ -334,27 +279,21 @@ export async function getVerifiedAvailability(input: unknown): Promise<Availabil
     );
   }
 
-  const apiKey = process.env.IRCTC_API_KEY?.trim() || "";
-  const classCode = params.classType || "3A";
-  const mockFare = classCode === '1A' ? 2400 : classCode === '2A' ? 1400 : classCode === '3A' ? 1000 : classCode === '3E' ? 900 : classCode === 'SL' ? 450 : 250;
-
   const data: VerifiedAvailability = {
     ...params,
     availabilityText: classified.text,
     status: classified.status,
     seats: classified.seats,
     availabilitySource: "date-specific-provider",
-    fare: fare > 0 ? fare : (apiKey ? null : mockFare),
+    fare: fare > 0 ? fare : null,
     fareSource: fare > 0 ? "date-specific-provider" : "unavailable",
     fareExactRequest: true,
     exactDate: true,
     availabilityStatus: "VERIFIED",
-    fareStatus: fare > 0 ? "VERIFIED" : (apiKey ? "PROVIDER_UNAVAILABLE" : "VERIFIED"),
+    fareStatus: fare > 0 ? "VERIFIED" : "PROVIDER_UNAVAILABLE",
     lookupReason: fare > 0
       ? "Verified live"
-      : apiKey
-        ? "Provider returned availability but did not return fare."
-        : "Verified live (mock fare fallback)",
+      : "Provider did not return fare.",
     proof: makeLookupProof(params),
     provider,
     rawAvailabilityRows: rows,
@@ -370,7 +309,7 @@ export async function getVerifiedAvailability(input: unknown): Promise<Availabil
       source: "live",
       provider,
       isLive: true,
-      warning: fare > 0 ? undefined : (apiKey ? "Provider returned availability but did not return fare." : "Provider returned availability, mock fare fallback used."),
+      warning: fare > 0 ? undefined : "Provider did not return fare.",
     }),
   };
 }

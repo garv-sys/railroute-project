@@ -1193,6 +1193,7 @@ export function TrainResultsWorkspace() {
             onSelectDate={selectNearbyDate}
             searchResultsTrains={state.trains}
             searchResultsSplits={state.splits}
+            hasSearched={hasSearched}
           />
         )}
         {(resultMode === "all" || resultMode === "direct") && (
@@ -2576,8 +2577,8 @@ export function SplitJourneyCard({
   const legTrust = legDataTrustCopy([leg1, leg2], trustMeta);
   const routeTitle = `${stationCompactLabel(actualLegSourceStation(leg1) || leg1.source)} → ${stationCompactLabel(hubCode)} → ${stationCompactLabel(actualLegDestinationStation(leg2) || leg2.destination)}`;
   const totalFareVerified = [leg1, leg2].every((leg) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
-  const leg1Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg1);
-  const leg2Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg2);
+  const leg1Class = scopedClass && scopedClass !== "ANY" ? scopedClass : (primaryClassCode(leg1) || "3A");
+  const leg2Class = scopedClass && scopedClass !== "ANY" ? scopedClass : (primaryClassCode(leg2) || "3A");
   const estimatedSplitFare = estimatedFareAmount(leg1, leg1Class) + estimatedFareAmount(leg2, leg2Class);
   const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
     ? formatFare(split.totalFare)
@@ -2589,7 +2590,7 @@ export function SplitJourneyCard({
     if (classPanel && classPanel.train?.trainNo === leg.trainNo && classPanel.train?.source === leg.source && classPanel.train?.destination === leg.destination) {
       return classPanel.classCode;
     }
-    return scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
+    return scopedClass && scopedClass !== "ANY" ? scopedClass : (primaryClassCode(leg) || "3A");
   }
 
   function legFareText(leg: any, fallbackFare: unknown) {

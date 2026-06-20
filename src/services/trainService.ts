@@ -1338,7 +1338,7 @@ async function generate6DayAvailability(
     availabilityStatusInput?: LookupTrustStatus,
     fareStatusInput?: LookupTrustStatus
   ): ClassAvailabilityItem => {
-    const isDemoMode = !process.env.IRCTC_API_KEY?.trim();
+    const isDemoMode = false;
     const finalFare = fare > 0 ? fare : (isDemoMode ? getFallbackMockFare(trainNo, source, destination, classCode) : 0);
     const availabilityStatus = notRunning
       ? 'PROVIDER_UNAVAILABLE'
@@ -1494,7 +1494,7 @@ async function generate6DayAvailability(
 
   try {
     const availData = await fetchAvailWithStationFallback(trainNo, source, destination, startDateStr, classCode);
-    const isDemoMode = !process.env.IRCTC_API_KEY?.trim();
+    const isDemoMode = false;
     if (!availData || availData.success === false) {
       const errorMsg = availData?.error || 'Provider check failed';
       if (!isDemoMode) {
@@ -1772,7 +1772,7 @@ async function generate6DayAvailability(
     }
   } catch (error: any) {
     console.warn(`[IRCTC] Availability check failed for ${trainNo}`, error?.message || error);
-    const isDemoMode = !process.env.IRCTC_API_KEY?.trim();
+    const isDemoMode = false;
     if (!isDemoMode) {
       for (let j = 0; j < 6; j++) {
         const dj = new Date(baseDate.getTime());
@@ -2154,7 +2154,7 @@ export async function searchTrainsSmart(source: string, dest: string, date: stri
       const getFallbackResult = () => {
         const localMatched = getDirectTrainsLocal(pair.source, pair.dest, date);
         if (localMatched.length > 0) return localMatched;
-        return generateMockTrainsLocal(pair.source, pair.dest, date);
+        return [];
       };
 
       try {
@@ -2698,7 +2698,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
       return -20;
     };
 
-    const requireVerifiedLiveSplit = options.fetchLive !== false;
+    const requireVerifiedLiveSplit = false;
 
     // Process route candidates in parallel batches to speed up
     const candidateBatchSize = isFullCoverage(options) ? 4 : 8;

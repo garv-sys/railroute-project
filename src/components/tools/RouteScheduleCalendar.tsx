@@ -14,6 +14,7 @@ interface RouteScheduleCalendarProps {
   onSelectDate: (date: string) => void;
   searchResultsTrains?: any[];
   searchResultsSplits?: any[];
+  hasSearched?: boolean;
 }
 
 function calculateDuration(srcStop: any, dstStop: any) {
@@ -36,6 +37,7 @@ export function RouteScheduleCalendar({
   onSelectDate,
   searchResultsTrains,
   searchResultsSplits,
+  hasSearched = false,
 }: RouteScheduleCalendarProps) {
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(activeDate || "2026-06-21");
 
@@ -58,6 +60,10 @@ export function RouteScheduleCalendar({
     // Prioritize actual live search results from provider
     if (searchResultsTrains && searchResultsTrains.length > 0) {
       return searchResultsTrains;
+    }
+
+    if (hasSearched && searchResultsTrains && searchResultsTrains.length === 0) {
+      return [];
     }
 
     if (!hasValidRoute) return [];
@@ -84,47 +90,13 @@ export function RouteScheduleCalendar({
       }
     }
 
-    // Fallback: If no direct trains match static data, generate mock daily trains so calendar is populated before search
+    // Fallback: If no direct trains match static data, do not generate mock trains
     if (matches.length === 0) {
-      const pairStr = `${source}_${destination}`;
-      let hash = 0;
-      for (let i = 0; i < pairStr.length; i++) {
-        hash = (hash * 31 + pairStr.charCodeAt(i)) % 8000;
-      }
-      const baseNo = 90000 + Math.abs(hash);
-
-      return [
-        {
-          trainNo: String(baseNo + 1),
-          train_no: String(baseNo + 1),
-          trainName: `${source}-${destination} SF EXPRESS`,
-          train_name: `${source}-${destination} SF EXPRESS`,
-          from_stn_code: source,
-          to_stn_code: destination,
-          from_time: "08:00",
-          to_time: "16:00",
-          duration: "08:00",
-          runsOnDays: "1111111",
-          running_days: "1111111",
-        },
-        {
-          trainNo: String(baseNo + 2),
-          train_no: String(baseNo + 2),
-          trainName: `${source}-${destination} RAJDHANI EXP`,
-          train_name: `${source}-${destination} RAJDHANI EXP`,
-          from_stn_code: source,
-          to_stn_code: destination,
-          from_time: "14:30",
-          to_time: "22:30",
-          duration: "08:00",
-          runsOnDays: "1111111",
-          running_days: "1111111",
-        }
-      ];
+      return [];
     }
 
     return matches;
-  }, [hasValidRoute, srcCodes, dstCodes, searchResultsTrains, source, destination]);
+  }, [hasValidRoute, srcCodes, dstCodes, searchResultsTrains, source, destination, hasSearched]);
 
   // Find all split routes
   const splitMatch = useMemo(() => {
@@ -135,6 +107,10 @@ export function RouteScheduleCalendar({
         leg1: [split.leg1],
         leg2: [split.leg2],
       }));
+    }
+
+    if (hasSearched && searchResultsSplits && searchResultsSplits.length === 0) {
+      return [];
     }
 
     if (!hasValidRoute) return [];
@@ -200,53 +176,13 @@ export function RouteScheduleCalendar({
       });
     }
 
-    // Fallback: If no split connections match static routes, generate a few mock connections via major hubs
+    // Fallback: If no split connections match static routes, do not generate mock routes
     if (connections.length === 0) {
-      const fallbackHubs = ["NDLS", "CNB", "PRYJ", "BSBS"].filter(h => h !== source && h !== destination);
-      connections = fallbackHubs.slice(0, 3).map(hubCode => {
-        const pair1 = `${source}_${hubCode}`;
-        const pair2 = `${hubCode}_${destination}`;
-        let h1 = 0, h2 = 0;
-        for (let i = 0; i < pair1.length; i++) h1 = (h1 * 31 + pair1.charCodeAt(i)) % 8000;
-        for (let i = 0; i < pair2.length; i++) h2 = (h2 * 31 + pair2.charCodeAt(i)) % 8000;
-        
-        const no1 = String(91000 + Math.abs(h1));
-        const no2 = String(92000 + Math.abs(h2));
-        
-        return {
-          hub: { code: hubCode, name: stationLabelFromCode(hubCode) || hubCode },
-          leg1: [{
-            trainNo: no1,
-            train_no: no1,
-            trainName: `${source}-${hubCode} SUPERFAST`,
-            train_name: `${source}-${hubCode} SUPERFAST`,
-            from_stn_code: source,
-            to_stn_code: hubCode,
-            from_time: "09:00",
-            to_time: "15:00",
-            duration: "06:00",
-            runsOnDays: "1111111",
-            running_days: "1111111",
-          }],
-          leg2: [{
-            trainNo: no2,
-            train_no: no2,
-            trainName: `${hubCode}-${destination} MAIL EXP`,
-            train_name: `${hubCode}-${destination} MAIL EXP`,
-            from_stn_code: hubCode,
-            to_stn_code: destination,
-            from_time: "17:00",
-            to_time: "23:00",
-            duration: "06:00",
-            runsOnDays: "1111111",
-            running_days: "1111111",
-          }]
-        };
-      });
+      return [];
     }
 
     return connections;
-  }, [hasValidRoute, srcCodes, dstCodes, searchResultsSplits, source, destination]);
+  }, [hasValidRoute, srcCodes, dstCodes, searchResultsSplits, source, destination, hasSearched]);
 
   // Helper to compute option counts for a specific date
   const getScheduleForDate = useMemo(() => {
