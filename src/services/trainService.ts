@@ -1134,6 +1134,7 @@ const USER_PRIORITY_HUBS = new Set([
   'CNB',
   'BSB', 'BSBS',
   'JP', 'KOTA', 'AII', 'AWR', 'AJM', 'MTJ', 'BKN', 'JU', 'UDZ',
+  'ROU', 'JSG', 'BSP', 'R', 'DURG', 'KTE', 'KMZ', 'JBP', 'ET', 'BPL', 'HBJ', 'RKMP', 'NGP', 'GWL', 'VGLJ', 'JHS'
 ]);
 
 export function dynamicSplitHubCandidates(source: string, dest: string, preferredHub = '', limit = Number.POSITIVE_INFINITY) {
@@ -1195,6 +1196,7 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     if (hubCode === preferred) return true;
     if (nearbySourceHubs.includes(hubCode)) return true;
     if (nearbyDestHubs.includes(hubCode)) return true;
+    if (USER_PRIORITY_HUBS.has(hubCode)) return true;
     const hubCoord = stationCoordinatesForRouting(hubCode);
     if (!hubCoord) return true;
     return isHubOnPath(sourceCoord, hubCoord, destCoord);
