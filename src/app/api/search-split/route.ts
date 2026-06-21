@@ -66,8 +66,8 @@ export async function POST(request: Request) {
       maxMultiLegOptions: 0,
       maxMultiCandidates: 0,
       maxMultiResults: 0,
-      plannerLegTimeoutMs: ckpRajasthanRequest ? 4200 : 3800,
-      globalTimeoutMs: ckpRajasthanRequest ? 15000 : 12500,
+      plannerLegTimeoutMs: ckpRajasthanRequest ? 5600 : 4400,
+      globalTimeoutMs: ckpRajasthanRequest ? 22000 : 18000,
       allowMixedClassSplits: true,
     } as const;
 
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
           maxMultiCandidates: ckpRajasthanRequest ? 150 : 120,
           maxMultiResults: ckpRajasthanRequest ? 18 : 12,
         }),
-        ckpRajasthanRequest ? 6_000 : 4_500,
+        ckpRajasthanRequest ? 7_500 : 5_500,
         []
       );
     const routeRecommendation = localRecommendation(directTrains, splitRoutes, multiSplitRoutes, budget);

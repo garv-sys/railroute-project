@@ -1180,8 +1180,13 @@ export function splitRouteStableKey(split: any) {
   const leg1 = split.leg1 || {};
   const leg2 = split.leg2 || {};
   return [
+    split.hubStation || actualLegDestinationStation(leg1) || actualLegSourceStation(leg2),
+    actualLegSourceStation(leg1) || leg1.source,
+    actualLegDestinationStation(leg1) || leg1.destination,
     leg1.trainNo,
     leg1.departureDate || leg1.journeyDate,
+    actualLegSourceStation(leg2) || leg2.source,
+    actualLegDestinationStation(leg2) || leg2.destination,
     leg2.trainNo,
     leg2.departureDate || leg2.journeyDate,
   ].map((value) => String(value || "").toUpperCase()).join("|");
@@ -1379,4 +1384,3 @@ export function groupSeatsForClass(classType: string, seats: ReturnType<typeof b
     seats: seats.slice(index * size, index * size + size),
   }));
 }
-
