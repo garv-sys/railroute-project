@@ -2251,7 +2251,7 @@ export function ClassRateStrip({
   journeyDate,
   selectedClass,
   quota = "GN",
-  autoFetchSelected = false,
+  autoFetchSelected = true,
   onSelect,
 }: {
   train: any;
@@ -2264,7 +2264,7 @@ export function ClassRateStrip({
   const [quotes, setQuotes] = useState<Record<string, LiveClassQuote>>({});
   const [loadingClass, setLoadingClass] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const autoFetchKey = useRef("");
+  const autoFetchedClasses = useRef<Set<string>>(new Set());
   const displayTrain = useMemo(
     () => Object.entries(quotes).reduce((current, [classCode, quote]) => applyLiveQuoteToTrain(current, classCode, quote), train),
     [quotes, train]
@@ -2310,16 +2310,31 @@ export function ClassRateStrip({
     }
   }
 
+  // Auto-fetch live fare + availability for all displayed classes on mount / when key params change
   useEffect(() => {
-    if (!autoFetchSelected || !selectedClassCode || loadingClass) return;
-    const key = `${train?.trainNo || ""}|${liveSourceStation(train)}|${liveDestinationStation(train)}|${journeyDate || ""}|${selectedClassCode}|${quota || "GN"}`;
-    if (autoFetchKey.current === key) return;
-    if (quotes[selectedClassCode] || !needsLiveQuotaRefresh(displayTrain, selectedClassCode)) return;
-    autoFetchKey.current = key;
-    void fetchClassQuote(selectedClassCode, false);
-    // The guard key above intentionally owns the one-shot auto fetch for this exact leg/class/date.
+    if (!autoFetchSelected || !journeyDate || !train?.trainNo || !train?.source || !train?.destination) return;
+    const codesToFetch = classCodes.filter((code) => {
+      if (!code || !needsLiveQuotaRefresh(displayTrain, code)) return false;
+      const key = `${train.trainNo}|${liveSourceStation(train)}|${liveDestinationStation(train)}|${journeyDate}|${code}|${quota || "GN"}`;
+      if (autoFetchedClasses.current.has(key)) return false;
+      autoFetchedClasses.current.add(key);
+      return true;
+    });
+    if (codesToFetch.length === 0) return;
+    // Fetch sequentially with a small delay between to avoid hammering the API
+    let cancelled = false;
+    (async () => {
+      for (const code of codesToFetch) {
+        if (cancelled) break;
+        await fetchClassQuote(code, false);
+        if (!cancelled && codesToFetch.indexOf(code) < codesToFetch.length - 1) {
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoFetchSelected, selectedClassCode, journeyDate, train?.trainNo, train?.source, train?.destination, loadingClass, quotes, displayTrain, quota]);
+  }, [autoFetchSelected, journeyDate, train?.trainNo, train?.source, train?.destination, selectedClassCode, quota]);
 
   return (
     <div className="mt-3 min-w-0 space-y-2">
