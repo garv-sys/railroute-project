@@ -95,7 +95,6 @@ import { ProductShell } from "../layout/ProductShell";
 import { ToolHeader } from "../layout/ToolHeader";
 import { CoachExplorer } from "./CoachExplorer";
 import { BookingWorkspace } from "./BookingWorkspace";
-import { RouteScheduleCalendar } from "./RouteScheduleCalendar";
 
 
 export function TrainResultsWorkspace() {
@@ -115,7 +114,7 @@ export function TrainResultsWorkspace() {
   const [classType, setClassType] = useState("3A");
   const [quota, setQuota] = useState("GN");
   const allowSplit = true;
-  const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi" | "calendar">("all");
+  const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi">("all");
   const [sortBy, setSortBy] = useState<"best" | "cheapest" | "highestFare" | "fastest" | "lowestLayover" | "earliest" | "latest">("best");
   const [maxFare, setMaxFare] = useState("");
   const [maxDuration, setMaxDuration] = useState("");
@@ -285,17 +284,6 @@ export function TrainResultsWorkspace() {
         return trainName.includes(query) || trainNo.includes(query);
       });
     }
-    const isExplicitlyUnbookable = (availText: string) => {
-      if (!availText) return false;
-      const status = availText.toUpperCase();
-      if (/PROVIDER|DATA UNAVAILABLE|RATE_LIMIT/i.test(status)) return false;
-      return /NOT BOOKABLE|NOT RUNNING|CLASS NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|UNAVAILABLE/.test(status) && !/CHECK|TAP/.test(status);
-    };
-    unverified = unverified.filter((train) => {
-      const reqClass = selectedSortClass || primaryClassCode(train);
-      const availText = train?.classAvailability?.[reqClass]?.[0]?.text || train?.classAvailability?.[reqClass]?.[0]?.availabilityText || train?.availability;
-      return !isExplicitlyUnbookable(availText);
-    });
     const sortedUnverified = [...unverified].sort((a, b) => {
       const fareA = selectedSortClass ? classFareAmount(a, selectedSortClass) : trainFareAmount(a);
       const fareB = selectedSortClass ? classFareAmount(b, selectedSortClass) : trainFareAmount(b);
@@ -323,19 +311,6 @@ export function TrainResultsWorkspace() {
         return l1Name.includes(query) || l1No.includes(query) || l2Name.includes(query) || l2No.includes(query);
       });
     }
-    const isExplicitlyUnbookable = (availText: string) => {
-      if (!availText) return false;
-      const status = availText.toUpperCase();
-      if (/PROVIDER|DATA UNAVAILABLE|RATE_LIMIT/i.test(status)) return false;
-      return /NOT BOOKABLE|NOT RUNNING|CLASS NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|UNAVAILABLE/.test(status) && !/CHECK|TAP/.test(status);
-    };
-    unverified = unverified.filter((split) => {
-      const l1Class = selectedSortClass || primaryClassCode(split.leg1);
-      const l2Class = selectedSortClass || primaryClassCode(split.leg2);
-      const avail1 = split.leg1?.classAvailability?.[l1Class]?.[0]?.text || split.leg1?.classAvailability?.[l1Class]?.[0]?.availabilityText || split.leg1?.availability;
-      const avail2 = split.leg2?.classAvailability?.[l2Class]?.[0]?.text || split.leg2?.classAvailability?.[l2Class]?.[0]?.availabilityText || split.leg2?.availability;
-      return !isExplicitlyUnbookable(avail1) && !isExplicitlyUnbookable(avail2);
-    });
     const sortedUnverified = [...unverified].sort((a, b) => {
       if (sortBy === "lowestLayover") return splitLayoverMinutes(a) - splitLayoverMinutes(b);
       if (sortBy === "fastest") return (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
@@ -585,18 +560,22 @@ export function TrainResultsWorkspace() {
     }
     setState({ loading: true, splitLoading: true, splitCoverage: "quick", error: "", trains: [], splits: [], multiSplits: [] });
     try {
-      let directTrainsList: any[] = [];
-      let splitRoutesList: any[] = [];
       let directCountForRequest = 0;
       let splitCountForRequest = 0;
-
       const directPromise = postJson<any>("/api/train-between", requestPayload)
         .then((direct) => {
           if (requestId !== searchRequestId.current) return [];
           const trains = direct.trains || [];
-          directTrainsList = trains;
           directCountForRequest = trains.length;
           setState((current) => ({ ...current, loading: false, trains, error: "" }));
+          queueLiveHydration(
+            trains,
+            { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
+            requestId,
+            hydrationId,
+            "direct train rows",
+            AUTO_LIVE_DIRECT_LIMIT
+          );
           return trains;
         })
         .catch((error) => {
@@ -614,7 +593,6 @@ export function TrainResultsWorkspace() {
         .then((split) => {
           const splitRoutes = split?.splitRoutes || split?.data?.splitRoutes || [];
           const multiSplitRoutes = split?.multiSplitRoutes || split?.data?.multiSplitRoutes || [];
-          splitRoutesList = splitRoutes;
           splitCountForRequest = splitRoutes.length + multiSplitRoutes.length;
           if (requestId !== searchRequestId.current) return;
           setState((current) => ({
@@ -624,6 +602,22 @@ export function TrainResultsWorkspace() {
             splits: splitRoutes,
             multiSplits: multiSplitRoutes,
           }));
+          const initialSplitRouteCount = Math.min(
+            splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination),
+            splitRoutes.length
+          );
+          splitAutoCheckedRouteCount.current = initialSplitRouteCount;
+          const prioritySplitRoutes = splitRoutes.slice(0, initialSplitRouteCount);
+          queueLiveHydration(
+            [
+              ...prioritySplitRoutes.flatMap((route: any) => [route.leg1, route.leg2]),
+            ],
+            { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
+            requestId,
+            hydrationId,
+            `first ${initialSplitRouteCount} split options`,
+            Number.POSITIVE_INFINITY
+          );
         })
         .catch(() => {
           if (requestId !== searchRequestId.current) return;
@@ -637,43 +631,8 @@ export function TrainResultsWorkspace() {
         });
 
       await Promise.allSettled([directPromise, splitPromise]);
-
-      if (requestId === searchRequestId.current) {
-        if (directCountForRequest === 0 && splitCountForRequest > 0) {
-          setResultMode("split");
-        }
-        
-        // Hydrate direct trains first
-        if (directTrainsList.length > 0) {
-          queueLiveHydration(
-            directTrainsList,
-            { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
-            requestId,
-            hydrationId,
-            "direct train rows",
-            AUTO_LIVE_DIRECT_LIMIT
-          );
-        }
-        
-        // Hydrate split routes next
-        if (splitRoutesList.length > 0) {
-          const initialSplitRouteCount = Math.min(
-            splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination),
-            splitRoutesList.length
-          );
-          splitAutoCheckedRouteCount.current = initialSplitRouteCount;
-          const prioritySplitRoutes = splitRoutesList.slice(0, initialSplitRouteCount);
-          queueLiveHydration(
-            [
-              ...prioritySplitRoutes.flatMap((route: any) => [route.leg1, route.leg2]),
-            ],
-            { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
-            requestId,
-            hydrationId,
-            `first ${initialSplitRouteCount} split options`,
-            Number.POSITIVE_INFINITY
-          );
-        }
+      if (requestId === searchRequestId.current && directCountForRequest === 0 && splitCountForRequest > 0) {
+        setResultMode("split");
       }
     } catch (error) {
       if (requestId !== searchRequestId.current) return;
@@ -694,12 +653,9 @@ export function TrainResultsWorkspace() {
 
   function requestedLiveClasses(train: any, requestedClass: string) {
     const selected = String(requestedClass || "").toUpperCase();
-    const availableClasses = displayClassesForTrain(train);
-    if (!availableClasses.length) return selected && selected !== "ANY" ? [selected] : [primaryClassCode(train)].filter(Boolean);
-    if (!selected || selected === "ANY") return availableClasses;
-    // Move selected class to the front
-    const filtered = availableClasses.filter(c => c !== selected);
-    return [selected, ...filtered];
+    if (selected && selected !== "ANY") return [selected];
+    const fallbackClass = selected && selected !== "ANY" ? selected : primaryClassCode(train);
+    return [fallbackClass].filter(Boolean);
   }
 
 	  function uniqueLiveTargets(trains: any[], requestedClass: string, fallbackDate: string) {
@@ -1129,9 +1085,8 @@ export function TrainResultsWorkspace() {
 	                : `All options (${allOptionCount})`],
 	              ["direct", directTabLabel],
 	              ["split", state.splitLoading && visibleSplitCount === 0 ? "Split Journey (finding...)" : `Split Journey (${visibleSplitCount})`],
-                ["calendar", "📅 60-Day Calendar View"],
 	            ].map(([key, label]) => (
-              <button key={key} type="button" onClick={() => setResultMode(key as "all" | "direct" | "split" | "multi" | "calendar")} className={`rounded-full border px-4 py-2 text-xs font-black ${resultMode === key ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 bg-white text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300"}`}>
+              <button key={key} type="button" onClick={() => setResultMode(key as "all" | "direct" | "split" | "multi")} className={`rounded-full border px-4 py-2 text-xs font-black ${resultMode === key ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 bg-white text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300"}`}>
                 {label}
               </button>
             ))}
@@ -1185,17 +1140,6 @@ export function TrainResultsWorkspace() {
 
           {/* Emergency travel panel removed per request */}
 	      <div className="mt-6 space-y-4">
-        {resultMode === "calendar" && (
-          <RouteScheduleCalendar
-            source={source}
-            destination={destination}
-            activeDate={date}
-            onSelectDate={selectNearbyDate}
-            searchResultsTrains={state.trains}
-            searchResultsSplits={state.splits}
-            hasSearched={hasSearched}
-          />
-        )}
         {(resultMode === "all" || resultMode === "direct") && (
           <>
             <ResultSectionHeader title="Direct Trains" detail="Single-train journeys returned by the provider for the selected station pair/date." />
@@ -1203,17 +1147,14 @@ export function TrainResultsWorkspace() {
               <LoadingBlock label="Loading direct trains..." />
             ) : visibleTrains.length > 0 ? (
               <>
-                 <div className="mb-4 text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
-                  {visibleTrains.length > 15
-                    ? `Showing top 15 of ${visibleTrains.length} direct trains found`
-                    : `${visibleTrains.length} direct ${visibleTrains.length === 1 ? "train" : "trains"} found`
-                  }
+                <div className="mb-4 text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
+                  {visibleTrains.length} {visibleTrains.length === 1 ? "train" : "trains"} found
                 </div>
                 {visibleTrains.length > 0 && shouldShowBestDirectPanel(source, destination, visibleTrains[0]) && (
                   <BestDirectOptionPanel train={visibleTrains[0]} />
                 )}
                 <div className="space-y-4">
-                  {visibleTrains.slice(0, 15).map((train) => (
+                  {visibleTrains.map((train) => (
                     <PremiumTrainCard
                       key={`${train.trainNo}-${train.source}-${train.destination}`}
                       train={train}
@@ -2577,8 +2518,8 @@ export function SplitJourneyCard({
   const legTrust = legDataTrustCopy([leg1, leg2], trustMeta);
   const routeTitle = `${stationCompactLabel(actualLegSourceStation(leg1) || leg1.source)} → ${stationCompactLabel(hubCode)} → ${stationCompactLabel(actualLegDestinationStation(leg2) || leg2.destination)}`;
   const totalFareVerified = [leg1, leg2].every((leg) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
-  const leg1Class = scopedClass && scopedClass !== "ANY" ? scopedClass : (primaryClassCode(leg1) || "3A");
-  const leg2Class = scopedClass && scopedClass !== "ANY" ? scopedClass : (primaryClassCode(leg2) || "3A");
+  const leg1Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg1);
+  const leg2Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg2);
   const estimatedSplitFare = estimatedFareAmount(leg1, leg1Class) + estimatedFareAmount(leg2, leg2Class);
   const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
     ? formatFare(split.totalFare)
@@ -2590,7 +2531,7 @@ export function SplitJourneyCard({
     if (classPanel && classPanel.train?.trainNo === leg.trainNo && classPanel.train?.source === leg.source && classPanel.train?.destination === leg.destination) {
       return classPanel.classCode;
     }
-    return scopedClass && scopedClass !== "ANY" ? scopedClass : (primaryClassCode(leg) || "3A");
+    return scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
   }
 
   function legFareText(leg: any, fallbackFare: unknown) {

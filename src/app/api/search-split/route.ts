@@ -45,24 +45,23 @@ export async function POST(request: Request) {
     const plannerOptions = {
       debug: Boolean(debug),
       fetchLive: true,
-      liveLookupLimit: 30,
+      liveLookupLimit: 40,
       coverageMode,
       exactStationOnly: false,
-      providerPairLimit: 20,
-      maxSplitHubs: 35,
-      maxSplitLegOptions: 60,
-      maxSplitCandidates: 400,
+      providerPairLimit: 5,
+      maxSplitHubs: 80,
+      maxSplitLegOptions: 18,
+      maxSplitCandidates: 800,
       maxSplitResults: 15,
       maxMultiPlans: 0,
       maxMultiLegOptions: 0,
       maxMultiCandidates: 0,
       maxMultiResults: 0,
-      plannerLegTimeoutMs: 2500,
-      globalTimeoutMs: 5000,
+      plannerLegTimeoutMs: 20000,
     } as const;
 
     const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);
-    const multiSplitRoutes = splitRoutes.length >= 15
+    const multiSplitRoutes = splitRoutes.length >= 20
       ? []
       : await withTimeout(
         findMultiSplitRoutes(source, destination, date, classType, preferredHub, {
@@ -70,9 +69,9 @@ export async function POST(request: Request) {
           maxMultiPlans: 10,
           maxMultiLegOptions: 4,
           maxMultiCandidates: 80,
-          maxMultiResults: 10,
+          maxMultiResults: 16,
         }),
-        2000,
+        8_000,
         []
       );
     const routeRecommendation = localRecommendation(directTrains, splitRoutes, multiSplitRoutes, budget);

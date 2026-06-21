@@ -526,6 +526,8 @@ export function liveFareText(train: any) {
   const fare = fareToNumber(train?.fare);
   const status = trainFareStatus(train);
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
+  const fallbackAmount = estimatedFareAmount(train, train?.classType || primaryClassCode(train));
+  if (fallbackAmount > 0) return formatFare(fallbackAmount);
   return "Fare unavailable";
 }
 
@@ -715,6 +717,8 @@ export function classFareText(train: any, classCode: string) {
   const fare = fareToNumber(first?.fare);
   const status = first?.fareStatus || "PROVIDER_UNAVAILABLE";
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
+  const fallbackAmount = estimatedFareAmount(train, classCode);
+  if (fallbackAmount > 0) return formatFare(fallbackAmount);
   return "Fare unavailable";
 }
 
