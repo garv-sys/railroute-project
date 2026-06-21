@@ -89,7 +89,7 @@ import {
   stationCompactLabel,
 } from "../shared/utils";
 import { LoadingBlock } from "../shared/LoadingBlock";
-import { TrustSummary, QuotaTimingNotice, RunningDaysStrip, primaryClassCode, classAvailabilityStatus, compactSeatText, classAvailabilityText, returnedClassesForTrain, liveFareText, compactFareText, fareTone, availabilityTone, readableRailStatus, fareToNumber, durationToMinutes, splitTotalDuration, splitLayoverMinutes, classFareAmount, trainFareAmount, timeToMinutes, multiSplitLayoverMinutes, actualLegSourceStation, actualLegDestinationStation, trainNumberName, isSeatAvailable, splitHasVerifiedFareAndSeats, formatFare, formatDurationLong, multiSplitHasVerifiedFareAndSeats, classFareText, classDataSourceLabel, debugModeEnabled, providerMarkedSelectedClassUnavailable, hasVerifiedFareAndSeat, dedupeSplitRoutes, isLongJourneyStationPair, splitRouteStableKey, splitAutoLiveRouteCountForJourney, liveSourceStation, liveDestinationStation, trainJourneyDate, needsLiveQuotaRefresh, type LiveClassQuote, applyLiveQuoteToTrain, liveQuoteFromResponse, isProviderDelay, providerDelayCopy, providerIssueCopy, lookupStatusLabel, fullStationLabelFromCode, SearchResultSummary, ResultSectionHeader, displayClassesForTrain, classCalendarFor, legUsesAlternateTerminal, nearbyTerminalDistanceSummary, requestedSourceStation, requestedDestinationStation, isUnavailableRailStatus, normalizedClassList, liveDataUnavailableWarning, ticketDecision, compactDebugJson, ExpectedPlatformPair, confirmationChanceLabel, confirmationChanceTone, PlatformPairSummary, platformDisplay, FareBreakdownPanel, availabilityCardTone, legDataTrustCopy, estimatedFareAmount, selectedClassCanBeChecked } from "../shared/TrustSummary";
+import { TrustSummary, QuotaTimingNotice, RunningDaysStrip, primaryClassCode, classAvailabilityStatus, compactSeatText, classAvailabilityText, returnedClassesForTrain, liveFareText, compactFareText, fareTone, availabilityTone, readableRailStatus, fareToNumber, durationToMinutes, splitTotalDuration, splitLayoverMinutes, classFareAmount, trainFareAmount, timeToMinutes, multiSplitLayoverMinutes, actualLegSourceStation, actualLegDestinationStation, trainNumberName, isSeatAvailable, splitHasVerifiedFareAndSeats, formatFare, formatDurationLong, multiSplitHasVerifiedFareAndSeats, classFareText, classDataSourceLabel, debugModeEnabled, providerMarkedSelectedClassUnavailable, hasVerifiedFareAndSeat, dedupeSplitRoutes, isLongJourneyStationPair, splitRouteStableKey, splitAutoLiveRouteCountForJourney, liveSourceStation, liveDestinationStation, trainJourneyDate, needsLiveQuotaRefresh, type LiveClassQuote, applyLiveQuoteToTrain, liveQuoteFromResponse, isProviderDelay, providerDelayCopy, providerIssueCopy, lookupStatusLabel, fullStationLabelFromCode, SearchResultSummary, ResultSectionHeader, displayClassesForTrain, classCalendarFor, legUsesAlternateTerminal, nearbyTerminalDistanceSummary, requestedSourceStation, requestedDestinationStation, isUnavailableRailStatus, normalizedClassList, liveDataUnavailableWarning, ticketDecision, compactDebugJson, ExpectedPlatformPair, confirmationChanceLabel, confirmationChanceTone, PlatformPairSummary, platformDisplay, FareBreakdownPanel, availabilityCardTone, legDataTrustCopy, estimatedFareAmount, selectedClassCanBeChecked, providerBookingBlockedText } from "../shared/TrustSummary";
 import { StationAutocomplete, RelatedStationChips, QuickSearch, resolveStationInput, splitBestRankScore, splitAvailabilityScore, multiSplitBestRankScore, DateQuickField, NearbyDateSuggestions } from "../shared/StationAutocomplete";
 import { ProductShell } from "../layout/ProductShell";
 import { ToolHeader } from "../layout/ToolHeader";
@@ -226,6 +226,13 @@ export function TrainResultsWorkspace() {
         const matchL2 = l2Name.includes(query) || l2No.includes(query);
         if (!matchL1 && !matchL2) return false;
       }
+      // Filter out splits where either leg is explicitly not bookable for the station pair
+      const isLegUnbookable = (leg: any) => {
+        const avail = String(leg?.availability || leg?.classAvailability?.[selectedSortClass || primaryClassCode(leg)]?.[0]?.availabilityText || leg?.classAvailability?.[selectedSortClass || primaryClassCode(leg)]?.[0]?.text || "");
+        const reason = String(leg?.lookupReason || leg?.classAvailability?.[selectedSortClass || primaryClassCode(leg)]?.[0]?.lookupReason || "");
+        return providerBookingBlockedText(avail) || providerBookingBlockedText(reason);
+      };
+      if (isLegUnbookable(split.leg1) || isLegUnbookable(split.leg2)) return false;
       // Only show splits where BOTH legs have confirmed fare + seat availability
       if (!splitHasVerifiedFareAndSeats(split, selectedSortClass)) return false;
       // Confirmed seats only filter
@@ -335,6 +342,14 @@ export function TrainResultsWorkspace() {
     const fareLimit = Number(maxFare) || Infinity;
     const durationLimit = maxDuration ? Number(maxDuration) * 60 : Infinity;
     return state.multiSplits.filter((split) => {
+      // Filter out multi-splits where any leg is explicitly unbookable
+      const legs: any[] = split.legs || [];
+      const isLegUnbookable = (leg: any) => {
+        const avail = String(leg?.availability || leg?.classAvailability?.[primaryClassCode(leg)]?.[0]?.availabilityText || leg?.classAvailability?.[primaryClassCode(leg)]?.[0]?.text || "");
+        const reason = String(leg?.lookupReason || leg?.classAvailability?.[primaryClassCode(leg)]?.[0]?.lookupReason || "");
+        return providerBookingBlockedText(avail) || providerBookingBlockedText(reason);
+      };
+      if (legs.some(isLegUnbookable)) return false;
       const getMultiFare = (s: any) => {
         const verifiedFare = fareToNumber(s.totalFare);
         if (verifiedFare > 0) return verifiedFare;
@@ -2340,14 +2355,20 @@ export function ClassRateStrip({
                 <span className="shrink-0 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-black text-white dark:bg-white dark:text-slate-950">{classCode}</span>
                 {needsFetch ? (
                   <>
-                    {fare && !/fare unavailable/i.test(fare) && <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>}
+                    {fare && !/fare unavailable/i.test(fare)
+                      ? <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>
+                      : <span className="max-w-full truncate rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300">Tap to check fare</span>
+                    }
                     <span className="min-w-0 max-w-full truncate rounded-md border border-cyan-300 bg-cyan-50 px-2.5 py-1 text-xs font-black text-cyan-800 dark:bg-cyan-300/12 dark:text-cyan-100">
                       {loadingClass === classCode ? "Fetching live..." : `Check seats ${classCode}`}
                     </span>
                   </>
                 ) : (
                   <>
-                    {fare && !/fare unavailable/i.test(fare) && <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>}
+                    {fare && !/fare unavailable/i.test(fare)
+                      ? <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>
+                      : <span className="max-w-full truncate rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300">Tap to check fare</span>
+                    }
                     <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${availabilityTone(status)}`}>{status}</span>
                   </>
                 )}
