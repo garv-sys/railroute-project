@@ -806,7 +806,7 @@ export function TrainResultsWorkspace() {
 	            rateLimited: current.rateLimited + (rateLimited ? 1 : 0),
 	          }));
 
-            await new Promise((resolve) => setTimeout(resolve, 250));
+            await new Promise((resolve) => setTimeout(resolve, 150));
         }
 
         if (requestId === searchRequestId.current && hydrationId === liveHydrationGeneration.current) {
@@ -2340,14 +2340,14 @@ export function ClassRateStrip({
                 <span className="shrink-0 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-black text-white dark:bg-white dark:text-slate-950">{classCode}</span>
                 {needsFetch ? (
                   <>
-                    <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>
+                    {fare && !/fare unavailable/i.test(fare) && <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>}
                     <span className="min-w-0 max-w-full truncate rounded-md border border-cyan-300 bg-cyan-50 px-2.5 py-1 text-xs font-black text-cyan-800 dark:bg-cyan-300/12 dark:text-cyan-100">
                       {loadingClass === classCode ? "Fetching live..." : `Check seats ${classCode}`}
                     </span>
                   </>
                 ) : (
                   <>
-                    <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>
+                    {fare && !/fare unavailable/i.test(fare) && <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>}
                     <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${availabilityTone(status)}`}>{status}</span>
                   </>
                 )}
@@ -2520,12 +2520,9 @@ export function SplitJourneyCard({
   const totalFareVerified = [leg1, leg2].every((leg) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
   const leg1Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg1);
   const leg2Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg2);
-  const estimatedSplitFare = estimatedFareAmount(leg1, leg1Class) + estimatedFareAmount(leg2, leg2Class);
   const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
     ? formatFare(split.totalFare)
-    : estimatedSplitFare > 0
-      ? `~₹${estimatedSplitFare.toLocaleString("en-IN")} est.`
-      : "Fare unavailable";
+    : "Fare unavailable";
 
   function selectedClassForLeg(leg: any) {
     if (classPanel && classPanel.train?.trainNo === leg.trainNo && classPanel.train?.source === leg.source && classPanel.train?.destination === leg.destination) {
@@ -2621,7 +2618,7 @@ export function SplitJourneyCard({
 	          </div>
 	          <div className="min-w-0">
 	            <div className="flex flex-wrap gap-2">
-	              <span className={`rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fareText)}`}>Final fare: {compactFareText(fareText)}</span>
+	              <span className={`rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fareText)}`}>{compactFareText(fareText) || "Tap to check fare"}</span>
 	              <span className={`rounded-md border px-2.5 py-1 text-xs font-black ${availabilityTone(seatText)}`}>{seatText}</span>
 	              {chanceCopy && (
 	                <span className={`rounded-md border px-2.5 py-1 text-xs font-black ${confirmationChanceTone(seatText, leg)}`}>
@@ -2713,9 +2710,11 @@ export function SplitJourneyCard({
           <span className={`rounded-md border px-2.5 py-1 font-black ${fareTone(totalFareText)}`}>
             Total cost: {totalFareText}
           </span>
-          <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 font-black text-slate-600 dark:border-white/10 dark:bg-white/8 dark:text-slate-200">
-            Leg fares: {compactFareText(legFareText(leg1, split.leg1Fare))} + {compactFareText(legFareText(leg2, split.leg2Fare))}
-          </span>
+          {(compactFareText(legFareText(leg1, split.leg1Fare)) || compactFareText(legFareText(leg2, split.leg2Fare))) && (
+            <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 font-black text-slate-600 dark:border-white/10 dark:bg-white/8 dark:text-slate-200">
+              Leg fares: {compactFareText(legFareText(leg1, split.leg1Fare)) || "—"} + {compactFareText(legFareText(leg2, split.leg2Fare)) || "—"}
+            </span>
+          )}
           <span className="rounded-md border border-amber-300/35 bg-amber-50 px-2.5 py-1 font-black text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
             Transfer buffer shown; platform numbers are assigned by railway operations.
           </span>
@@ -2750,15 +2749,9 @@ export function MultiSplitJourneyCard({
   const trustMeta = trustMetaFromTrain(legs[0] || {}, { splitRoute: true });
   const legTrust = legDataTrustCopy(legs, trustMeta);
   const totalFareVerified = legs.length > 0 && legs.every((leg: any) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
-  const estimatedMultiFare = legs.reduce((sum: number, leg: any) => {
-    const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
-    return sum + estimatedFareAmount(leg, legClass);
-  }, 0);
   const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
     ? formatFare(split.totalFare)
-    : estimatedMultiFare > 0
-      ? `~₹${estimatedMultiFare.toLocaleString("en-IN")} est.`
-      : "Fare unavailable";
+    : "Fare unavailable";
 
   function isSelectedRouteLeg(leg: any) {
     return Boolean(

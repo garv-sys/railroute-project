@@ -512,8 +512,7 @@ export function estimatedFareAmount(train: any, classCode: string) {
 }
 
 export function estimatedFareText(train: any, classCode: string) {
-  const amount = estimatedFareAmount(train, classCode);
-  return amount > 0 ? `~₹${amount.toLocaleString("en-IN")} est.` : "Fare unavailable";
+  return "Fare unavailable";
 }
 
 export function liveSeatText(train: any) {
@@ -526,8 +525,6 @@ export function liveFareText(train: any) {
   const fare = fareToNumber(train?.fare);
   const status = trainFareStatus(train);
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
-  const fallbackAmount = estimatedFareAmount(train, train?.classType || primaryClassCode(train));
-  if (fallbackAmount > 0) return formatFare(fallbackAmount);
   return "Fare unavailable";
 }
 
@@ -542,7 +539,7 @@ export function classFareAmount(train: any, classCode: string) {
   const rowFare = fareToNumber(row?.fare);
   if (rowFare > 0) return rowFare;
   if (String(train?.classType || "").toUpperCase() === code) return trainFareAmount(train);
-  return estimatedFareAmount(train, code);
+  return 0;
 }
 
 export function classFareBreakdown(train: any, classCode: string) {
@@ -635,7 +632,9 @@ export function liveDataUnavailableWarning(train: any, classCode?: string) {
 
 export function compactFareText(value: unknown) {
   const text = String(value || "").trim();
-  if (/^~?₹[\d,]+\s*est\./i.test(text)) return text;
+  // Never show estimated guesses or "Fare unavailable" text in badges
+  if (/^~?₹[\d,]+\s*est\./i.test(text)) return "";
+  if (/fare unavailable/i.test(text)) return "";
   if (/not requested|check fare|tap class/i.test(text)) return "Check Fare";
   return formatFare(value);
 }
@@ -717,8 +716,6 @@ export function classFareText(train: any, classCode: string) {
   const fare = fareToNumber(first?.fare);
   const status = first?.fareStatus || "PROVIDER_UNAVAILABLE";
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
-  const fallbackAmount = estimatedFareAmount(train, classCode);
-  if (fallbackAmount > 0) return formatFare(fallbackAmount);
   return "Fare unavailable";
 }
 
@@ -986,7 +983,7 @@ export function fareToNumber(value: unknown) {
 export function trainFareAmount(train: any) {
   const exact = fareToNumber(train?.fare ?? train?.totalFare);
   if (exact > 0) return exact;
-  return estimatedFareAmount(train, train?.classType || primaryClassCode(train));
+  return 0;
 }
 
 export function hasProviderLegData(leg: any) {

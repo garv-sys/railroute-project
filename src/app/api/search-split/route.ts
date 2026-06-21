@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     const plannerOptions = {
       debug: Boolean(debug),
       fetchLive: true,
-      liveLookupLimit: 40,
+      liveLookupLimit: 12,
       coverageMode,
       exactStationOnly: false,
       providerPairLimit: 5,
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
       maxMultiLegOptions: 0,
       maxMultiCandidates: 0,
       maxMultiResults: 0,
-      plannerLegTimeoutMs: 20000,
+      plannerLegTimeoutMs: 3500,
     } as const;
 
     const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
           maxMultiCandidates: 80,
           maxMultiResults: 16,
         }),
-        8_000,
+        1500,
         []
       );
     const routeRecommendation = localRecommendation(directTrains, splitRoutes, multiSplitRoutes, budget);
