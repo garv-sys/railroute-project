@@ -53,8 +53,18 @@ function rescueRouteKey(route: any) {
   ].map((item) => String(item || '').toUpperCase()).join('|');
 }
 
+function rescueDisplayKey(route: any) {
+  return [
+    route.hubStation,
+    route.leg1?.trainNo,
+    route.leg2?.trainNo,
+    route.layoverDuration,
+  ].map((item) => String(item || '').toUpperCase()).join('|');
+}
+
 async function ckpJaipurRescueRoutes(date: string, classType: string, existingRoutes: any[] = []) {
   const existing = new Set(existingRoutes.map(rescueRouteKey));
+  const displaySeen = new Set(existingRoutes.map(rescueDisplayKey));
   const hubs = ['NGP', 'NDLS'];
   const rescued: any[] = [];
 
@@ -119,8 +129,10 @@ async function ckpJaipurRescueRoutes(date: string, classType: string, existingRo
             combinedConfirmationChance: null,
           };
           const key = rescueRouteKey(route);
-          if (!existing.has(key)) {
+          const displayKey = rescueDisplayKey(route);
+          if (!existing.has(key) && !displaySeen.has(displayKey)) {
             existing.add(key);
+            displaySeen.add(displayKey);
             rescued.push(route);
           }
         }
