@@ -76,39 +76,25 @@ export async function POST(request: Request) {
           []
         );
 
-    const LIVE_TOP_SPLIT = Math.min(3, splitRoutes.length);
-    let liveFulfilled = 0;
-    let liveRejected = 0;
-    let liveRejectReasons: string[] = [];
+    const LIVE_TOP_SPLIT = Math.min(2, splitRoutes.length);
     if (LIVE_TOP_SPLIT > 0) {
       const liveEnrichPromises = splitRoutes.slice(0, LIVE_TOP_SPLIT).flatMap((route) => {
         const legDate = route.leg1Date || route.leg2Date || date;
         return [
-          enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }),
-          enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }),
+          enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: false, liveLookupLimit: 2, debug: false }),
+          enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: false, liveLookupLimit: 2, debug: false }),
         ];
       });
 
       const liveEnrichResults = await Promise.allSettled(liveEnrichPromises);
-      liveFulfilled = 0;
-      liveRejected = 0;
-      liveRejectReasons = [];
       for (let i = 0; i < LIVE_TOP_SPLIT; i++) {
         const leg1Result = liveEnrichResults[i * 2];
         const leg2Result = liveEnrichResults[i * 2 + 1];
         if (leg1Result.status === 'fulfilled' && leg1Result.value?.trainNo) {
-          liveFulfilled++;
           splitRoutes[i].leg1 = leg1Result.value;
-        } else {
-          liveRejected++;
-          if (leg1Result.status === 'rejected') liveRejectReasons.push(String(leg1Result.reason || '').slice(0, 100));
         }
         if (leg2Result.status === 'fulfilled' && leg2Result.value?.trainNo) {
-          liveFulfilled++;
           splitRoutes[i].leg2 = leg2Result.value;
-        } else {
-          liveRejected++;
-          if (leg2Result.status === 'rejected') liveRejectReasons.push(String(leg2Result.reason || '').slice(0, 100));
         }
         const leg1Avail = String(splitRoutes[i].leg1?.availability || splitRoutes[i].leg1?.classAvailability?.[classType]?.[0]?.text || '');
         const leg2Avail = String(splitRoutes[i].leg2?.availability || splitRoutes[i].leg2?.classAvailability?.[classType]?.[0]?.text || '');
@@ -158,7 +144,6 @@ export async function POST(request: Request) {
         routeRecommendation,
         coverageMode,
         canExpand: splitRoutes.length >= plannerOptions.maxSplitResults,
-        debugLive: { liveFulfilled, liveRejected, liveRejectReasons: [], testMarker: 'POST_PROCESSING_ACTIVE' }
       },
     });
   } catch (error: any) {
