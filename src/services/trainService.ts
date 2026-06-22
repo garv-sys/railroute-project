@@ -2899,107 +2899,110 @@ export async function findSmartRoutes(source: string, dest: string, date: string
       }
     }
 
-    const usedShapes = new Set<string>();
-    const usedShapesWithHubs = new Set<string>();
+    const usedCombinations = new Set<string>();
     const finalDiverseRoutes: SplitRouteResult[] = [];
+    const hubUsageCount = new Map<string, number>();
+    const trainUsageCount = new Map<string, number>();
 
     const sortedValid = validRoutes.sort((a, b) => b.score - a.score);
-    const splitShapeKey = (route: SplitRouteResult) => [
-	      route.leg1.trainNo,
-	      route.leg1.journeyDate,
-	      route.leg2.trainNo,
-	      route.leg2.journeyDate,
-	    ].map((value) => String(value || '').toUpperCase()).join('|');
 
-    const splitShapeWithHubKey = (route: SplitRouteResult) => [
-	      route.leg1.trainNo,
-	      route.leg1.journeyDate,
-	      route.leg2.trainNo,
-	      route.leg2.journeyDate,
-	      route.hubStation,
-	    ].map((value) => String(value || '').toUpperCase()).join('|');
+    const routeCombinationKey = (route: SplitRouteResult) => {
+      const t1 = cleanTrainNo(route.leg1?.trainNo || '');
+      const t2 = cleanTrainNo(route.leg2?.trainNo || '');
+      return [t1, t2].sort().join('|');
+    };
 
-    const hubGroupCounts = new Map<string, number>();
-    const leg1TrainCounts = new Map<string, number>();
-    const leg2TrainCounts = new Map<string, number>();
+    const transferMinutes = (route: SplitRouteResult) => Math.round(route.layoverHours * 60);
 
-    const addRoute = (route: SplitRouteResult, strictShape: boolean, enforceGroupLimit: boolean) => {
-      if (!route || finalDiverseRoutes.length >= splitResultLimit) return false;
+    const hasAcceptableTransfer = (route: SplitRouteResult) => {
+      const mins = transferMinutes(route);
+      return mins >= 30 && mins <= 480;
+    };
 
-      const t1No = cleanTrainNo(route.leg1?.trainNo || "");
-      const t2No = cleanTrainNo(route.leg2?.trainNo || "");
+    const rankScore = (route: SplitRouteResult) => {
+      let score = route.score || 50;
 
-      const group = hubGroupForDiversity(route.hubStation);
-      if (enforceGroupLimit) {
-        const count = hubGroupCounts.get(group) || 0;
-        if (count >= 3) return false;
+      const mins = transferMinutes(route);
+      if (mins < 30) score -= 200;
+      else if (mins < 45) score -= 50;
+      else if (mins <= 180) score += 15;
+      else if (mins <= 360) score -= (mins - 180) / 60 * 8;
+      else score -= 120;
 
-        if (t1No) {
-          const t1Count = leg1TrainCounts.get(t1No) || 0;
-          if (t1Count >= 3) return false;
-        }
-        if (t2No) {
-          const t2Count = leg2TrainCounts.get(t2No) || 0;
-          if (t2Count >= 3) return false;
-        }
+      const leg1Mins = parseDurationMins(route.leg1.duration || '');
+      const leg2Mins = parseDurationMins(route.leg2.duration || '');
+      const totalHours = (leg1Mins + leg2Mins) / 60 + route.layoverHours;
+      score -= totalHours * 1.5;
+
+      if (route.totalFare > 0) {
+        score += Math.max(0, 40 - route.totalFare / 80);
       }
 
-      const hubKey = splitShapeWithHubKey(route);
-      if (usedShapesWithHubs.has(hubKey)) return false;
-      
-      const shape = splitShapeKey(route);
-      if (strictShape && usedShapes.has(shape)) return false;
+      const combo = routeCombinationKey(route);
+      const existingUses = trainUsageCount.get(combo) || 0;
+      score -= existingUses * 20;
 
-      usedShapes.add(shape);
-      usedShapesWithHubs.add(hubKey);
-      hubGroupCounts.set(group, (hubGroupCounts.get(group) || 0) + 1);
-      if (t1No) leg1TrainCounts.set(t1No, (leg1TrainCounts.get(t1No) || 0) + 1);
-      if (t2No) leg2TrainCounts.set(t2No, (leg2TrainCounts.get(t2No) || 0) + 1);
-      finalDiverseRoutes.push(route);
+      const t1 = cleanTrainNo(route.leg1?.trainNo || '');
+      const t2 = cleanTrainNo(route.leg2?.trainNo || '');
+      if (t1) score -= (trainUsageCount.get(t1) || 0) * 8;
+      if (t2) score -= (trainUsageCount.get(t2) || 0) * 8;
+
+      return Math.max(0, Math.min(100, Math.round(score)));
+    };
+
+    const canAddRoute = (route: SplitRouteResult, hubMax: number = 3, trainMax: number = 3) => {
+      if (finalDiverseRoutes.length >= splitResultLimit) return false;
+      if (!hasAcceptableTransfer(route)) return false;
+
+      const combo = routeCombinationKey(route);
+      if (usedCombinations.has(combo)) return false;
+
+      const hub = hubGroupForDiversity(route.hubStation);
+      if ((hubUsageCount.get(hub) || 0) >= hubMax) return false;
+
+      const t1 = cleanTrainNo(route.leg1?.trainNo || '');
+      const t2 = cleanTrainNo(route.leg2?.trainNo || '');
+      if (t1 && (trainUsageCount.get(t1) || 0) >= trainMax) return false;
+      if (t2 && (trainUsageCount.get(t2) || 0) >= trainMax) return false;
+
       return true;
     };
 
-    const groupedRoutes = new Map<string, SplitRouteResult[]>();
-    for (const route of sortedValid) {
-      const group = hubGroupForDiversity(route.hubStation);
-      const list = groupedRoutes.get(group) || [];
-      list.push(route);
-      groupedRoutes.set(group, list);
-    }
+    const addRoute = (route: SplitRouteResult, hubMax: number = 3, trainMax: number = 3) => {
+      if (!canAddRoute(route, hubMax, trainMax)) return false;
 
-    const groupOrder = Array.from(groupedRoutes.keys())
-      .sort((a, b) => (groupedRoutes.get(b)?.[0]?.score || 0) - (groupedRoutes.get(a)?.[0]?.score || 0));
+      const combo = routeCombinationKey(route);
+      const hub = hubGroupForDiversity(route.hubStation);
+      const t1 = cleanTrainNo(route.leg1?.trainNo || '');
+      const t2 = cleanTrainNo(route.leg2?.trainNo || '');
 
-    // First round: index 0 from all groups (with shape uniqueness and group limit of 3)
-    for (const group of groupOrder) {
+      usedCombinations.add(combo);
+      hubUsageCount.set(hub, (hubUsageCount.get(hub) || 0) + 1);
+      if (t1) trainUsageCount.set(t1, (trainUsageCount.get(t1) || 0) + 1);
+      if (t2) trainUsageCount.set(t2, (trainUsageCount.get(t2) || 0) + 1);
+
+      const enriched = { ...route, score: rankScore(route) };
+      finalDiverseRoutes.push(enriched);
+      return true;
+    };
+
+    const rankedRoutes = validRoutes
+      .filter(hasAcceptableTransfer)
+      .map(route => ({ route, score: rankScore(route) }))
+      .sort((a, b) => b.score - a.score);
+
+    for (const { route } of rankedRoutes) {
       if (finalDiverseRoutes.length >= splitResultLimit) break;
-      const route = groupedRoutes.get(group)?.[0];
-      if (route) addRoute(route, true, true);
+      addRoute(route, 3, 3);
     }
 
-    // Second round: index 1, 2, 3... (with shape uniqueness and group limit of 3)
-    const maxGroupSize = Math.max(...Array.from(groupedRoutes.values()).map((routes) => routes.length), 0);
-    for (let index = 1; index < maxGroupSize && finalDiverseRoutes.length < splitResultLimit; index += 1) {
-      for (const group of groupOrder) {
+    if (finalDiverseRoutes.length < splitResultLimit) {
+      for (const route of sortedValid) {
         if (finalDiverseRoutes.length >= splitResultLimit) break;
-        const route = groupedRoutes.get(group)?.[index];
-        if (route) addRoute(route, true, true);
+        if (finalDiverseRoutes.some(r => routeCombinationKey(r) === routeCombinationKey(route))) continue;
+        if (!hasAcceptableTransfer(route)) continue;
+        addRoute(route, 5, 5);
       }
-    }
-
-    // Third round: relaxed group limit but still enforcing shape uniqueness
-    for (let index = 1; index < maxGroupSize && finalDiverseRoutes.length < splitResultLimit; index += 1) {
-      for (const group of groupOrder) {
-        if (finalDiverseRoutes.length >= splitResultLimit) break;
-        const route = groupedRoutes.get(group)?.[index];
-        if (route) addRoute(route, true, false);
-      }
-    }
-
-    // Fourth round: fallback to add remaining routes without strict shape uniqueness if we still have slots
-    for (const route of sortedValid) {
-      if (finalDiverseRoutes.length >= splitResultLimit) break;
-      addRoute(route, false, false);
     }
 
     return finalDiverseRoutes;

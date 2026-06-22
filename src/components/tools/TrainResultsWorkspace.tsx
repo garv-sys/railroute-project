@@ -697,18 +697,15 @@ export function TrainResultsWorkspace() {
         }),
       ];
 
-      if (mergedTrains.length > 0 && mergedTrains.length !== directCountForRequest) {
-        directCountForRequest = mergedTrains.length;
-        setState((current) => ({ ...current, loading: false, trains: mergedTrains, error: "" }));
-        queueLiveHydration(
-          mergedTrains,
-          { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
-          requestId,
-          hydrationId,
-          "merged direct train rows",
-          AUTO_LIVE_DIRECT_LIMIT
-        );
-      }
+      setState((current) => ({ ...current, loading: false, trains: mergedTrains, error: mergedTrains.length === 0 && (forwardDirect.status !== 'fulfilled' && reverseDirect.status !== 'fulfilled') ? 'No direct trains found for this route.' : "" }));
+      queueLiveHydration(
+        mergedTrains,
+        { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
+        requestId,
+        hydrationId,
+        "merged direct train rows",
+        AUTO_LIVE_DIRECT_LIMIT
+      );
 
       if (forwardSplits.status === 'fulfilled' || reverseSplits.status === 'fulfilled') {
         const currentSplits = state.splits;
