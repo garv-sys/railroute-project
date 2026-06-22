@@ -90,9 +90,9 @@ export async function POST(request: Request) {
       });
 
       const liveEnrichResults = await Promise.allSettled(liveEnrichPromises);
-      let liveFulfilled = 0;
-      let liveRejected = 0;
-      let liveRejectReasons: string[] = [];
+      liveFulfilled = 0;
+      liveRejected = 0;
+      liveRejectReasons = [];
       for (let i = 0; i < LIVE_TOP_SPLIT; i++) {
         const leg1Result = liveEnrichResults[i * 2];
         const leg2Result = liveEnrichResults[i * 2 + 1];
