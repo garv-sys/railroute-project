@@ -356,7 +356,8 @@ function providerClassesForTrain(train: any) {
     if (Array.isArray(value)) return value;
     return String(value || '').split(/[,/| ]+/);
   }).map((value) => String(value).toUpperCase().trim()).filter((value) => known.has(value));
-  return Array.from(new Set(parsed));
+  const result = Array.from(new Set(parsed));
+  return result.length ? result : ['2A', '3A', 'SL'];
 }
 
 const STANDARD_LONG_DISTANCE_CLASSES = ['1A', '2A', '3A', '3E', 'SL'];
