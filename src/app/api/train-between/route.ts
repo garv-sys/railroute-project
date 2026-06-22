@@ -1,8 +1,9 @@
 import { checkDirectTrains } from '@/services/trainService';
-import { enrichWithLiveAvailability } from '@/services/trainService';
 import { trustMetaForTrainList } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
+
+const NOT_BOOKABLE = /not available for booking|not bookable|train not on scheduled date|not scheduled|not running|class does not exist|class not available|class not returned|booking\/cancellation not allowed|does not exist in this train|sorry[, ]+this train is not available/i;
 
 export async function POST(request: Request) {
   const requestId = `tb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -36,6 +37,14 @@ export async function POST(request: Request) {
       { debug: true, fetchLive: false, liveLookupLimit: 0, exactStationOnly: false, providerPairLimit: 20, plannerLegTimeoutMs: 3000 }
     );
 
+    const cleanTrains = trains.filter((t: any) => {
+      const raw = [t.availability, t.fare, ...(Array.isArray(t.classAvailability) ? [] : Object.values(t.classAvailability || {})).map((c: any) => typeof c === 'string' ? c : (c?.text || c?.status || ''))]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return !NOT_BOOKABLE.test(raw);
+    });
+
     if (!trains.length) {
       console.warn('[api/train-between] Empty provider result', { requestId, ...query });
       // Return a diagnostic payload to help trace the empty result
@@ -51,8 +60,8 @@ export async function POST(request: Request) {
       });
     }
 
-    const meta = trustMetaForTrainList(trains);
-    return apiSuccess({ requestId, data: { trains }, meta, extra: { trains } });
+    const meta = trustMetaForTrainList(cleanTrains);
+    return apiSuccess({ requestId, data: { trains: cleanTrains }, meta, extra: { trains: cleanTrains } });
   } catch (error: any) {
     console.error('[api/train-between] Error', { requestId, error });
     return apiFailure({ error: error?.message || 'Internal server error', requestId, provider: 'RailRoute train search API' });

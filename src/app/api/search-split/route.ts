@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     if (LIVE_TOP_MULTI > 0) {
       const multiLivePromises = multiSplitRoutes.slice(0, LIVE_TOP_MULTI).flatMap((route) => {
         const legs = route.legs || [];
-        return legs.map((leg: any) => enrichWithLiveAvailability(leg, date, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }));
+        return legs.map((leg: any) => enrichWithLiveAvailability(leg, date, classType, { fetchLive: false, liveLookupLimit: 2, debug: false }));
       });
 
       const multiLiveResults = await Promise.allSettled(multiLivePromises);
