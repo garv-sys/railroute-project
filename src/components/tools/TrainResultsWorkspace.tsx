@@ -686,7 +686,15 @@ export function TrainResultsWorkspace() {
 
       const mergedTrains = [
         ...(forwardDirect.status === 'fulfilled' ? forwardDirect.value : []),
-        ...(reverseDirect.status === 'fulfilled' ? reverseDirect.value : []),
+        ...(reverseDirect.status === 'fulfilled' ? reverseDirect.value : []).filter((t: any) => {
+          const tSrc = (t.source || '').toUpperCase();
+          const tDst = (t.destination || '').toUpperCase();
+          const userSrc = (providerPayload.source || '').toUpperCase();
+          const userDst = (providerPayload.destination || '').toUpperCase();
+          if (tSrc === userDst && tDst === userSrc) return false;
+          if (tSrc === userSrc && tDst === userDst) return true;
+          return true;
+        }),
       ];
 
       if (mergedTrains.length > 0 && mergedTrains.length !== directCountForRequest) {
@@ -707,15 +715,33 @@ export function TrainResultsWorkspace() {
         const currentMultiSplits = state.multiSplits;
         const forwardSplitData = forwardSplits.status === 'fulfilled' ? forwardSplits.value : null;
         const reverseSplitData = reverseSplits.status === 'fulfilled' ? reverseSplits.value : null;
+
+        const filterReverseSplitRoutes = (routes: any[] = [], src: string, dst: string) => {
+          return routes.filter((route) => {
+            const leg1 = route.leg1 || {};
+            const leg1Src = (leg1.source || leg1.trainSource || '').toUpperCase();
+            const leg1Dst = (leg1.destination || leg1.trainDestination || '').toUpperCase();
+            const leg2 = route.leg2 || {};
+            const leg2Src = (leg2.source || leg2.trainSource || '').toUpperCase();
+            const leg2Dst = (leg2.destination || leg2.trainDestination || '').toUpperCase();
+
+            if (leg1Src === src && leg1Dst === dst) return true;
+            if (leg1Src === dst && leg1Dst === src) return false;
+            if ((leg1Src === src || !leg1Src) && (leg2Dst === dst || leg2Src === dst)) return true;
+            if (leg1Src === dst && leg2Dst === src) return false;
+            return true;
+          });
+        };
+
         const newSplits = [
           ...currentSplits,
           ...(forwardSplitData?.splitRoutes || []),
-          ...(reverseSplitData?.splitRoutes || []),
+          ...filterReverseSplitRoutes(reverseSplitData?.splitRoutes || [], providerPayload.source.toUpperCase(), providerPayload.destination.toUpperCase()),
         ];
         const newMultiSplits = [
           ...currentMultiSplits,
           ...(forwardSplitData?.multiSplitRoutes || []),
-          ...(reverseSplitData?.multiSplitRoutes || []),
+          ...filterReverseSplitRoutes(reverseSplitData?.multiSplitRoutes || [], providerPayload.source.toUpperCase(), providerPayload.destination.toUpperCase()),
         ];
         setState((current) => ({
           ...current,
