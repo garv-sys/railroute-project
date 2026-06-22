@@ -158,7 +158,7 @@ export async function POST(request: Request) {
         routeRecommendation,
         coverageMode,
         canExpand: splitRoutes.length >= plannerOptions.maxSplitResults,
-        debugLive: { liveFulfilled, liveRejected, liveRejectReasons: [] }
+        debugLive: { liveFulfilled, liveRejected, liveRejectReasons: [], testMarker: 'POST_PROCESSING_ACTIVE' }
       },
     });
   } catch (error: any) {
