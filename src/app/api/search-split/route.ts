@@ -5,7 +5,7 @@ import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
 
 function localRecommendation(directTrains: any[], splitRoutes: any[], multiSplitRoutes: any[] = [], budget?: string) {
   const budgetNote = budget ? ` Budget filter requested: ${budget}.` : "";
-  return `[LIVE_SPLIT_v2] Provider returned ${directTrains?.length || 0} direct train(s), ${splitRoutes?.length || 0} two-leg split option(s), and ${multiSplitRoutes?.length || 0} multi-leg split option(s).${budgetNote}`;
+  return `Provider returned ${directTrains?.length || 0} direct train(s), ${splitRoutes?.length || 0} two-leg split option(s), and ${multiSplitRoutes?.length || 0} multi-leg split option(s).${budgetNote}`;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
@@ -96,14 +96,26 @@ export async function POST(request: Request) {
         if (leg2Result.status === 'fulfilled' && leg2Result.value?.trainNo) {
           splitRoutes[i].leg2 = leg2Result.value;
         }
-        const leg1Avail = String(splitRoutes[i].leg1?.availability || splitRoutes[i].leg1?.classAvailability?.[classType]?.[0]?.text || '');
-        const leg2Avail = String(splitRoutes[i].leg2?.availability || splitRoutes[i].leg2?.classAvailability?.[classType]?.[0]?.text || '');
-        if (leg1Avail.includes('Not Running') || leg2Avail.includes('Not Running') || leg1Avail.includes('not running')) {
-          splitRoutes.splice(i, 1);
-          i--;
-        }
       }
     }
+
+    const splitBlocked = (route: any) => {
+      const leg1 = route.leg1 || {};
+      const leg2 = route.leg2 || {};
+      const leg1Status = String(leg1.availabilityStatus || leg1.status || '').toUpperCase();
+      const leg2Status = String(leg2.availabilityStatus || leg2.status || '').toUpperCase();
+      if (leg1Status === 'NOT_RUNNING' || leg2Status === 'NOT_RUNNING') return true;
+      if (leg1Status === 'PROVIDER_UNAVAILABLE' || leg2Status === 'PROVIDER_UNAVAILABLE') return true;
+      const leg1Text = String(leg1.availability || leg1.classAvailability?.[classType]?.[0]?.text || '').toLowerCase();
+      const leg2Text = String(leg2.availability || leg2.classAvailability?.[classType]?.[0]?.text || '').toLowerCase();
+      const blockedPatterns = ['not available for booking', 'not bookable', 'not running', 'class does not exist', 'booking/cancellation not allowed'];
+      for (const p of blockedPatterns) {
+        if (leg1Text.includes(p) || leg2Text.includes(p)) return true;
+      }
+      return false;
+    };
+
+    const filteredSplitRoutes = splitRoutes.filter((route) => !splitBlocked(route));
 
     const LIVE_TOP_MULTI = Math.min(2, multiSplitRoutes.length);
     if (LIVE_TOP_MULTI > 0) {
@@ -135,15 +147,15 @@ export async function POST(request: Request) {
     });
 
     return apiSuccess({
-      data: { splitRoutes, multiSplitRoutes, routeRecommendation },
+      data: { splitRoutes: filteredSplitRoutes, multiSplitRoutes, routeRecommendation },
       meta,
       requestId,
       extra: {
-        splitRoutes,
+        splitRoutes: filteredSplitRoutes,
         multiSplitRoutes,
         routeRecommendation,
         coverageMode,
-        canExpand: splitRoutes.length >= plannerOptions.maxSplitResults,
+        canExpand: filteredSplitRoutes.length >= plannerOptions.maxSplitResults,
       },
     });
   } catch (error: any) {

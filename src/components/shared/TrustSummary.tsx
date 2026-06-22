@@ -291,13 +291,13 @@ export function trainFareStatus(train: any, classCode?: string): LookupTrustStat
 export function readableRailStatus(value: unknown) {
   const text = String(value || "").trim();
   if (!text) return "";
-  if (/booking\/cancellation not allowed for given pair of stations/i.test(text)) return "Not bookable for station pair";
-  if (/not available for booking for this date/i.test(text)) return "Not bookable on this date";
-  if (/not available for booking/i.test(text)) return "Not bookable";
+  if (/booking\/cancellation not allowed for given pair of stations/i.test(text)) return "";
+  if (/not available for booking for this date/i.test(text)) return "";
+  if (/not available for booking/i.test(text)) return "";
   if (/not requested|check availability/i.test(text)) return "Tap to check seats";
   if (/rate.?limit|too many requests|429|delayed this exact request/i.test(text)) return "Check seats";
   if (/failed to fetch|fetch failed|live fetch failed|check seats on irctc|provider request failed|invalid availability format|provider did not return|provider returned no quota|request failed|availability unavailable/i.test(text)) return "Check seats";
-  if (/class .*does not exist|class .*not.*returned|coach .*not.*available/i.test(text)) return "Class not available";
+  if (/class .*does not exist|class .*not.*returned|coach .*not.*available/i.test(text)) return "";
   if (/checking/i.test(text)) return "Tap to check seats";
   return text;
 }
@@ -305,13 +305,13 @@ export function readableRailStatus(value: unknown) {
 export function providerUnavailableCopy(reason: unknown, classCode: string) {
   const text = String(reason || "").trim();
   if (/booking\/cancellation not allowed for given pair of stations/i.test(text)) {
-    return "Not bookable for station pair";
+    return "";
   }
   if (/not available for booking for this date/i.test(text)) {
-    return "Not bookable on this date";
+    return "";
   }
   if (/not available for booking/i.test(text)) {
-    return "Not bookable";
+    return "";
   }
   if (/rate.?limit|too many requests|429|delayed this exact request/i.test(text)) return `Check seats ${classCode}`;
   if (/not requested|check availability/i.test(text)) return `Tap to check seats ${classCode}`;
