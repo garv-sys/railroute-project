@@ -1951,6 +1951,8 @@ export async function enrichWithLiveAvailability(train: any, date: string, class
   // 3. Generate multi-class availability matrix for every returned class.
   baseResult.classAvailability = {};
   const classesToRender = baseResult.classes || [];
+  const knownClasses = new Set(['1A', '2A', '3A', '3E', 'SL', '2S', 'CC', 'EC', 'FC']);
+  const resolveLiveClass = (cls: string) => knownClasses.has(cls.toUpperCase()) ? cls.toUpperCase() : '3A';
   const classesToCheck = options.fetchLive === false
     ? Array.from(new Set([
         ...liveProbeClassesForTrain(train),
@@ -1958,7 +1960,7 @@ export async function enrichWithLiveAvailability(train: any, date: string, class
         ...(effectiveTargetClass ? [effectiveTargetClass] : []),
       ]))
     : Array.from(new Set([
-        effectiveTargetClass || requestedClass || '3A',
+        resolveLiveClass(effectiveTargetClass || requestedClass),
       ]));
   await Promise.all(classesToCheck.map(async (cls) => {
     // Use the provider's actual station codes (from_stn_code / to_stn_code) for the
