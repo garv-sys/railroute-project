@@ -331,8 +331,15 @@ function providerRunningDaysToMonFirst(value: unknown): boolean[] | undefined {
   return text.split('').map((item) => item === '1');
 }
 
-function trainRunsOnRailDate(runningDays: unknown, date: string) {
-  return true;
+function trainRunsOnRailDate(runningDays: unknown, date: string): boolean {
+  const text = String(runningDays || '');
+  if (!/^[01]{7}$/.test(text)) return true;
+  const days = text.split('').map((item) => item === '1');
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return true;
+  const jsDay = d.getDay();
+  const idx = jsDay === 0 ? 6 : jsDay - 1;
+  return days[idx];
 }
 
 function providerClassesForTrain(train: any) {
@@ -1826,7 +1833,7 @@ async function generate6DayAvailability(
 }
 
 // Enriches a train with provider availability and lightweight display metadata.
-async function enrichWithLiveAvailability(train: any, date: string, classType: string, options: TrainSearchOptions = {}): Promise<TrainResult> {
+export async function enrichWithLiveAvailability(train: any, date: string, classType: string, options: TrainSearchOptions = {}): Promise<TrainResult> {
   const trainNo = train.train_no || train.train_number || train.trainno || train.trainNumber;
   const source = train.from_stn_code || train.from_station_code || train.fromStnCode || train.train_src || train.source;
   const destination = train.to_stn_code || train.to_station_code || train.toStnCode || train.train_dstn || train.dest;
