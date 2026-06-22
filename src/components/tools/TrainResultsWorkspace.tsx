@@ -2374,6 +2374,7 @@ export function ClassRateStrip({
   quota = "GN",
   autoFetchSelected = true,
   onSelect,
+  onQuotesFetched,
 }: {
   train: any;
   journeyDate: string;
@@ -2381,6 +2382,7 @@ export function ClassRateStrip({
   quota?: string;
   autoFetchSelected?: boolean;
   onSelect: (selection: ClassPanelSelection) => void;
+  onQuotesFetched?: (trainNo: string, quotes: Record<string, LiveClassQuote>) => void;
 }) {
   const [quotes, setQuotes] = useState<Record<string, LiveClassQuote>>({});
   const [loadingClass, setLoadingClass] = useState("");
@@ -2421,7 +2423,11 @@ export function ClassRateStrip({
       });
       const quote = liveQuoteFromResponse(response, classCode, journeyDate);
       const nextTrain = applyLiveQuoteToTrain(displayTrain, classCode, quote);
-      setQuotes((current) => ({ ...current, [classCode]: quote }));
+      setQuotes((current) => {
+        const updated = { ...current, [classCode]: quote };
+        onQuotesFetched?.(String(train?.trainNo || ""), updated);
+        return updated;
+      });
       if (openPanel) onSelect({ train: nextTrain, classCode, label: `${classCode} class` });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Live quota unavailable";
@@ -2594,6 +2600,11 @@ export function SplitJourneyCard({
 }) {
   const leg1 = split.leg1 || {};
   const leg2 = split.leg2 || {};
+  // Track live-fetched quotes per leg (keyed by trainNo) to update total fare display
+  const [legQuotes, setLegQuotes] = useState<Record<string, Record<string, LiveClassQuote>>>({});
+  function handleLegQuotesFetched(trainNo: string, quotes: Record<string, LiveClassQuote>) {
+    setLegQuotes((prev) => ({ ...prev, [trainNo]: { ...(prev[trainNo] || {}), ...quotes } }));
+  }
   const [routeTrain, setRouteTrain] = useState<any | null>(null);
   const [classPanel, setClassPanel] = useState<ClassPanelSelection | null>(null);
 
@@ -2677,9 +2688,21 @@ export function SplitJourneyCard({
   const totalFareVerified = [leg1, leg2].every((leg) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
   const leg1Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg1);
   const leg2Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg2);
-  const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
-    ? formatFare(split.totalFare)
-    : "";
+  // Compute live total fare from ClassRateStrip-fetched quotes when available
+  const leg1LiveQuotes = legQuotes[String(leg1?.trainNo || "")] || {};
+  const leg2LiveQuotes = legQuotes[String(leg2?.trainNo || "")] || {};
+  const leg1LiveFare = fareToNumber(leg1LiveQuotes[leg1Class]?.fare) || fareToNumber(Object.values(leg1LiveQuotes)[0]?.fare);
+  const leg2LiveFare = fareToNumber(leg2LiveQuotes[leg2Class]?.fare) || fareToNumber(Object.values(leg2LiveQuotes)[0]?.fare);
+  const liveTotalFare = leg1LiveFare > 0 && leg2LiveFare > 0 ? leg1LiveFare + leg2LiveFare : 0;
+  const estimatedSplitFare = estimatedFareAmount(leg1, leg1Class) + estimatedFareAmount(leg2, leg2Class);
+  const rawTotalFare = fareToNumber(split.totalFare);
+  const totalFareText = liveTotalFare > 0
+    ? `₹${liveTotalFare}`
+    : rawTotalFare > 0
+      ? `~₹${rawTotalFare} est.`
+      : estimatedSplitFare > 0
+        ? `~₹${estimatedSplitFare} est.`
+        : "Check Fare";
 
   function selectedClassForLeg(leg: any) {
     if (classPanel && classPanel.train?.trainNo === leg.trainNo && classPanel.train?.source === leg.source && classPanel.train?.destination === leg.destination) {
@@ -2689,9 +2712,16 @@ export function SplitJourneyCard({
   }
 
   function legFareText(leg: any, fallbackFare: unknown) {
+    // Check live quotes fetched from ClassRateStrip first
+    const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
+    const localQuotes = legQuotes[String(leg?.trainNo || "")] || {};
+    const localFare = fareToNumber(localQuotes[legClass]?.fare) || fareToNumber(Object.values(localQuotes)[0]?.fare);
+    if (localFare > 0) return `₹${localFare}`;
     if (trainFareAmount(leg) > 0) return liveFareText(leg);
-    if (fareToNumber(fallbackFare) > 0 && String(leg?.fareStatus || "").toUpperCase() === "VERIFIED") return formatFare(fallbackFare);
-    return liveFareText(leg);
+    if (fareToNumber(fallbackFare) > 0) return `~₹${fareToNumber(fallbackFare)} est.`;
+    const est = estimatedFareAmount(leg, legClass);
+    if (est > 0) return `~₹${est} est.`;
+    return "Check Fare";
   }
 
   function selectedClassCopy(leg: any, classCode: string) {
@@ -2800,6 +2830,7 @@ export function SplitJourneyCard({
               quota={quota}
               autoFetchSelected={autoFetchLive}
               onSelect={(selection) => setClassPanel({ ...selection, label: `${label} · ${selection.classCode}` })}
+              onQuotesFetched={handleLegQuotesFetched}
             />
           </div>
           <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
@@ -2899,16 +2930,41 @@ export function MultiSplitJourneyCard({
   const legs = split.legs || [];
   const [routeTrain, setRouteTrain] = useState<any | null>(null);
   const [classPanel, setClassPanel] = useState<ClassPanelSelection | null>(null);
+  // Track live-fetched quotes per leg to update total cost display
+  const [legQuotes, setLegQuotes] = useState<Record<string, Record<string, LiveClassQuote>>>({});
+  function handleLegQuotesFetched(trainNo: string, quotes: Record<string, LiveClassQuote>) {
+    setLegQuotes((prev) => ({ ...prev, [trainNo]: { ...(prev[trainNo] || {}), ...quotes } }));
+  }
   const scopedClass = String(requestedClass || "").toUpperCase().trim();
   const path = legs.length
     ? [legs[0]?.source, ...split.interchangeStations, legs[legs.length - 1]?.destination].filter(Boolean)
     : split.interchangeStations || [];
   const trustMeta = trustMetaFromTrain(legs[0] || {}, { splitRoute: true });
   const legTrust = legDataTrustCopy(legs, trustMeta);
-  const totalFareVerified = legs.length > 0 && legs.every((leg: any) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
-  const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
-    ? formatFare(split.totalFare)
-    : "";
+  const estimatedMultiFare = legs.reduce((sum: number, leg: any) => {
+    const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
+    return sum + estimatedFareAmount(leg, legClass);
+  }, 0);
+  const rawTotalFare = fareToNumber(split.totalFare);
+  // Compute live total from ClassRateStrip quotes when all legs have data
+  const liveTotalFareFromQuotes = (() => {
+    let total = 0;
+    for (const leg of legs) {
+      const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
+      const quotes = legQuotes[String(leg?.trainNo || "")] || {};
+      const fare = fareToNumber(quotes[legClass]?.fare) || fareToNumber(Object.values(quotes)[0]?.fare);
+      if (fare <= 0) return 0; // Not all legs have live data yet
+      total += fare;
+    }
+    return total;
+  })();
+  const totalFareText = liveTotalFareFromQuotes > 0
+    ? `₹${liveTotalFareFromQuotes}`
+    : rawTotalFare > 0
+      ? `~₹${rawTotalFare} est.`
+      : estimatedMultiFare > 0
+        ? `~₹${estimatedMultiFare} est.`
+        : "Check Fare";
 
   function isSelectedRouteLeg(leg: any) {
     return Boolean(
@@ -2984,6 +3040,7 @@ export function MultiSplitJourneyCard({
               quota={quota}
               autoFetchSelected={autoFetchLive}
               onSelect={(selection) => setClassPanel({ ...selection, label: `Journey ${index + 1} · ${selection.classCode}` })}
+              onQuotesFetched={handleLegQuotesFetched}
             />
             <div className="mt-3 flex flex-wrap gap-2">
               <button type="button" onClick={() => setRouteTrain(routeOpen ? null : leg)} className="rounded-full border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-[11px] font-black text-cyan-800 dark:bg-cyan-300/12 dark:text-cyan-100">{routeOpen ? "Hide route" : "Route"}</button>
