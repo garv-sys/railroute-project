@@ -76,10 +76,12 @@ export async function POST(request: Request) {
           []
         );
 
-    const LIVE_TOP_N = Math.min(3, splitRoutes.length);
-    console.log('[search-split] LIVE_TOP_N=', LIVE_TOP_N, 'splitRoutes.length=', splitRoutes.length);
-    if (LIVE_TOP_N > 0) {
-      const liveEnrichPromises = splitRoutes.slice(0, LIVE_TOP_N).flatMap((route) => {
+    const LIVE_TOP_SPLIT = Math.min(3, splitRoutes.length);
+    let liveFulfilled = 0;
+    let liveRejected = 0;
+    let liveRejectReasons: string[] = [];
+    if (LIVE_TOP_SPLIT > 0) {
+      const liveEnrichPromises = splitRoutes.slice(0, LIVE_TOP_SPLIT).flatMap((route) => {
         const legDate = route.leg1Date || route.leg2Date || date;
         return [
           enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }),
@@ -88,48 +90,50 @@ export async function POST(request: Request) {
       });
 
       const liveEnrichResults = await Promise.allSettled(liveEnrichPromises);
-      console.log('[search-split] liveEnrichResults count=', liveEnrichResults.length, 'fulfilled=', liveEnrichResults.filter(r => r.status === 'fulfilled').length);
       let liveFulfilled = 0;
       let liveRejected = 0;
       let liveRejectReasons: string[] = [];
-      for (let i = 0; i < LIVE_TOP_N; i++) {
-      const leg1Result = liveEnrichResults[i * 2];
-      const leg2Result = liveEnrichResults[i * 2 + 1];
-      if (leg1Result.status === 'fulfilled' && leg1Result.value?.trainNo) {
-        liveFulfilled++;
-        splitRoutes[i].leg1 = leg1Result.value;
-      } else {
-        liveRejected++;
-        if (leg1Result.status === 'rejected') liveRejectReasons.push(String(leg1Result.reason || '').slice(0, 100));
-      }
-      if (leg2Result.status === 'fulfilled' && leg2Result.value?.trainNo) {
-        liveFulfilled++;
-        splitRoutes[i].leg2 = leg2Result.value;
-      } else {
-        liveRejected++;
-        if (leg2Result.status === 'rejected') liveRejectReasons.push(String(leg2Result.reason || '').slice(0, 100));
-      }
-      const leg1Avail = String(splitRoutes[i].leg1?.availability || splitRoutes[i].leg1?.classAvailability?.[classType]?.[0]?.text || '');
-      const leg2Avail = String(splitRoutes[i].leg2?.availability || splitRoutes[i].leg2?.classAvailability?.[classType]?.[0]?.text || '');
-      if (leg1Avail.includes('Not Running') || leg2Avail.includes('Not Running') || leg1Avail.includes('not running')) {
-        splitRoutes.splice(i, 1);
-        i--;
+      for (let i = 0; i < LIVE_TOP_SPLIT; i++) {
+        const leg1Result = liveEnrichResults[i * 2];
+        const leg2Result = liveEnrichResults[i * 2 + 1];
+        if (leg1Result.status === 'fulfilled' && leg1Result.value?.trainNo) {
+          liveFulfilled++;
+          splitRoutes[i].leg1 = leg1Result.value;
+        } else {
+          liveRejected++;
+          if (leg1Result.status === 'rejected') liveRejectReasons.push(String(leg1Result.reason || '').slice(0, 100));
+        }
+        if (leg2Result.status === 'fulfilled' && leg2Result.value?.trainNo) {
+          liveFulfilled++;
+          splitRoutes[i].leg2 = leg2Result.value;
+        } else {
+          liveRejected++;
+          if (leg2Result.status === 'rejected') liveRejectReasons.push(String(leg2Result.reason || '').slice(0, 100));
+        }
+        const leg1Avail = String(splitRoutes[i].leg1?.availability || splitRoutes[i].leg1?.classAvailability?.[classType]?.[0]?.text || '');
+        const leg2Avail = String(splitRoutes[i].leg2?.availability || splitRoutes[i].leg2?.classAvailability?.[classType]?.[0]?.text || '');
+        if (leg1Avail.includes('Not Running') || leg2Avail.includes('Not Running') || leg1Avail.includes('not running')) {
+          splitRoutes.splice(i, 1);
+          i--;
+        }
       }
     }
 
-    const LIVE_MULTI_N = Math.min(2, multiSplitRoutes.length);
-    const multiLivePromises = multiSplitRoutes.slice(0, LIVE_MULTI_N).flatMap((route) => {
-      const legs = route.legs || [];
-      return legs.map((leg: any) => enrichWithLiveAvailability(leg, date, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }));
-    });
+    const LIVE_TOP_MULTI = Math.min(2, multiSplitRoutes.length);
+    if (LIVE_TOP_MULTI > 0) {
+      const multiLivePromises = multiSplitRoutes.slice(0, LIVE_TOP_MULTI).flatMap((route) => {
+        const legs = route.legs || [];
+        return legs.map((leg: any) => enrichWithLiveAvailability(leg, date, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }));
+      });
 
-    const multiLiveResults = await Promise.allSettled(multiLivePromises);
-    for (let i = 0; i < LIVE_MULTI_N; i++) {
-      const legs = multiSplitRoutes[i].legs || [];
-      for (let j = 0; j < legs.length; j++) {
-        const result = multiLiveResults[i * legs.length + j];
-        if (result.status === 'fulfilled' && result.value?.trainNo) {
-          legs[j] = result.value;
+      const multiLiveResults = await Promise.allSettled(multiLivePromises);
+      for (let i = 0; i < LIVE_TOP_MULTI; i++) {
+        const legs = multiSplitRoutes[i].legs || [];
+        for (let j = 0; j < legs.length; j++) {
+          const result = multiLiveResults[i * legs.length + j];
+          if (result.status === 'fulfilled' && result.value?.trainNo) {
+            legs[j] = result.value;
+          }
         }
       }
     }
@@ -148,13 +152,13 @@ export async function POST(request: Request) {
       data: { splitRoutes, multiSplitRoutes, routeRecommendation },
       meta,
       requestId,
-      extra: { 
-        splitRoutes, 
-        multiSplitRoutes, 
-        routeRecommendation, 
-        coverageMode, 
+      extra: {
+        splitRoutes,
+        multiSplitRoutes,
+        routeRecommendation,
+        coverageMode,
         canExpand: splitRoutes.length >= plannerOptions.maxSplitResults,
-        debugLive: { liveFulfilled, liveRejected, liveRejectReasons: liveRejectReasons.slice(0, 5) }
+        debugLive: { liveFulfilled, liveRejected, liveRejectReasons: [] }
       },
     });
   } catch (error: any) {
