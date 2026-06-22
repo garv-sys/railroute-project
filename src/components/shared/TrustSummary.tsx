@@ -512,7 +512,7 @@ export function estimatedFareAmount(train: any, classCode: string) {
 }
 
 export function estimatedFareText(train: any, classCode: string) {
-  return "Fare unavailable";
+  return "";
 }
 
 export function liveSeatText(train: any) {
@@ -525,7 +525,7 @@ export function liveFareText(train: any) {
   const fare = fareToNumber(train?.fare);
   const status = trainFareStatus(train);
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
-  return "Fare unavailable";
+  return "";
 }
 
 export function providerBookingBlockedText(value: unknown) {
@@ -716,7 +716,7 @@ export function classFareText(train: any, classCode: string) {
   const fare = fareToNumber(first?.fare);
   const status = first?.fareStatus || "PROVIDER_UNAVAILABLE";
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
-  return "Fare unavailable";
+  return "";
 }
 
 

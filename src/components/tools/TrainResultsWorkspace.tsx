@@ -2679,7 +2679,7 @@ export function SplitJourneyCard({
   const leg2Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg2);
   const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
     ? formatFare(split.totalFare)
-    : "Fare unavailable";
+    : "";
 
   function selectedClassForLeg(leg: any) {
     if (classPanel && classPanel.train?.trainNo === leg.trainNo && classPanel.train?.source === leg.source && classPanel.train?.destination === leg.destination) {
@@ -2908,7 +2908,7 @@ export function MultiSplitJourneyCard({
   const totalFareVerified = legs.length > 0 && legs.every((leg: any) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
   const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
     ? formatFare(split.totalFare)
-    : "Fare unavailable";
+    : "";
 
   function isSelectedRouteLeg(leg: any) {
     return Boolean(
