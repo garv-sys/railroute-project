@@ -77,19 +77,22 @@ export async function POST(request: Request) {
         );
 
     const LIVE_TOP_N = Math.min(3, splitRoutes.length);
-    const liveEnrichPromises = splitRoutes.slice(0, LIVE_TOP_N).flatMap((route) => {
-      const legDate = route.leg1Date || route.leg2Date || date;
-      return [
-        enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }),
-        enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }),
-      ];
-    });
+    console.log('[search-split] LIVE_TOP_N=', LIVE_TOP_N, 'splitRoutes.length=', splitRoutes.length);
+    if (LIVE_TOP_N > 0) {
+      const liveEnrichPromises = splitRoutes.slice(0, LIVE_TOP_N).flatMap((route) => {
+        const legDate = route.leg1Date || route.leg2Date || date;
+        return [
+          enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }),
+          enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: true, liveLookupLimit: 2, debug: false }),
+        ];
+      });
 
-    const liveEnrichResults = await Promise.allSettled(liveEnrichPromises);
-    let liveFulfilled = 0;
-    let liveRejected = 0;
-    let liveRejectReasons: string[] = [];
-    for (let i = 0; i < LIVE_TOP_N; i++) {
+      const liveEnrichResults = await Promise.allSettled(liveEnrichPromises);
+      console.log('[search-split] liveEnrichResults count=', liveEnrichResults.length, 'fulfilled=', liveEnrichResults.filter(r => r.status === 'fulfilled').length);
+      let liveFulfilled = 0;
+      let liveRejected = 0;
+      let liveRejectReasons: string[] = [];
+      for (let i = 0; i < LIVE_TOP_N; i++) {
       const leg1Result = liveEnrichResults[i * 2];
       const leg2Result = liveEnrichResults[i * 2 + 1];
       if (leg1Result.status === 'fulfilled' && leg1Result.value?.trainNo) {
