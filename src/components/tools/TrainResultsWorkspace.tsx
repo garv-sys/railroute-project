@@ -577,11 +577,16 @@ export function TrainResultsWorkspace() {
     try {
       let directCountForRequest = 0;
       let splitCountForRequest = 0;
-      const directPromise = postJson<any>("/api/train-between", requestPayload)
+
+      const reversePayload = { ...requestPayload };
+      reversePayload.source = requestPayload.destination;
+      reversePayload.destination = requestPayload.source;
+
+      const forwardDirectPromise = postJson<any>("/api/train-between", requestPayload)
         .then((direct) => {
           if (requestId !== searchRequestId.current) return [];
           const trains = direct.trains || [];
-          directCountForRequest = trains.length;
+          directCountForRequest += trains.length;
           setState((current) => ({ ...current, loading: false, trains, error: "" }));
           queueLiveHydration(
             trains,
@@ -600,7 +605,17 @@ export function TrainResultsWorkspace() {
           return [];
         });
 
-      const splitPromise = postJson<any>("/api/search-split", {
+      const reverseDirectPromise = postJson<any>("/api/train-between", reversePayload)
+        .then((direct) => {
+          if (requestId !== searchRequestId.current) return [];
+          return direct.trains || [];
+        })
+        .catch(() => {
+          if (requestId !== searchRequestId.current) return [];
+          return [];
+        });
+
+      const forwardSplitPromise = postJson<any>("/api/search-split", {
         ...requestPayload,
         directTrains: [],
         mode: "quick",
@@ -608,7 +623,7 @@ export function TrainResultsWorkspace() {
         .then((split) => {
           const splitRoutes = split?.splitRoutes || split?.data?.splitRoutes || [];
           const multiSplitRoutes = split?.multiSplitRoutes || split?.data?.multiSplitRoutes || [];
-          splitCountForRequest = splitRoutes.length + multiSplitRoutes.length;
+          splitCountForRequest += splitRoutes.length + multiSplitRoutes.length;
           if (requestId !== searchRequestId.current) return;
           setState((current) => ({
             ...current,
@@ -633,9 +648,10 @@ export function TrainResultsWorkspace() {
             `first ${initialSplitRouteCount} split options`,
             Number.POSITIVE_INFINITY
           );
+          return { splitRoutes, multiSplitRoutes };
         })
         .catch(() => {
-          if (requestId !== searchRequestId.current) return;
+          if (requestId !== searchRequestId.current) return { splitRoutes: [], multiSplitRoutes: [] };
           setState((current) => ({
             ...current,
             splitLoading: false,
@@ -643,9 +659,91 @@ export function TrainResultsWorkspace() {
             splits: [],
             multiSplits: [],
           }));
+          return { splitRoutes: [], multiSplitRoutes: [] };
         });
 
-      await Promise.allSettled([directPromise, splitPromise]);
+      const reverseSplitPromise = postJson<any>("/api/search-split", {
+        ...reversePayload,
+        directTrains: [],
+        mode: "quick",
+      })
+        .then((split) => {
+          const splitRoutes = split?.splitRoutes || split?.data?.splitRoutes || [];
+          const multiSplitRoutes = split?.multiSplitRoutes || split?.data?.multiSplitRoutes || [];
+          splitCountForRequest += splitRoutes.length + multiSplitRoutes.length;
+          return { splitRoutes, multiSplitRoutes };
+        })
+        .catch(() => {
+          return { splitRoutes: [], multiSplitRoutes: [] };
+        });
+
+      const [[forwardDirect, reverseDirect], [forwardSplits, reverseSplits]] = await Promise.all([
+        Promise.allSettled([forwardDirectPromise, reverseDirectPromise]),
+        Promise.allSettled([forwardSplitPromise, reverseSplitPromise]),
+      ]);
+
+      if (requestId !== searchRequestId.current) return;
+
+      const mergedTrains = [
+        ...(forwardDirect.status === 'fulfilled' ? forwardDirect.value : []),
+        ...(reverseDirect.status === 'fulfilled' ? reverseDirect.value : []),
+      ];
+
+      if (mergedTrains.length > 0 && mergedTrains.length !== directCountForRequest) {
+        directCountForRequest = mergedTrains.length;
+        setState((current) => ({ ...current, loading: false, trains: mergedTrains, error: "" }));
+        queueLiveHydration(
+          mergedTrains,
+          { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
+          requestId,
+          hydrationId,
+          "merged direct train rows",
+          AUTO_LIVE_DIRECT_LIMIT
+        );
+      }
+
+      if (forwardSplits.status === 'fulfilled' || reverseSplits.status === 'fulfilled') {
+        const currentSplits = state.splits;
+        const currentMultiSplits = state.multiSplits;
+        const forwardSplitData = forwardSplits.status === 'fulfilled' ? forwardSplits.value : null;
+        const reverseSplitData = reverseSplits.status === 'fulfilled' ? reverseSplits.value : null;
+        const newSplits = [
+          ...currentSplits,
+          ...(forwardSplitData?.splitRoutes || []),
+          ...(reverseSplitData?.splitRoutes || []),
+        ];
+        const newMultiSplits = [
+          ...currentMultiSplits,
+          ...(forwardSplitData?.multiSplitRoutes || []),
+          ...(reverseSplitData?.multiSplitRoutes || []),
+        ];
+        setState((current) => ({
+          ...current,
+          splitLoading: false,
+          splitCoverage: "quick",
+          splits: newSplits,
+          multiSplits: newMultiSplits,
+        }));
+
+        const totalSplitRoutes = newSplits.length;
+        const initialSplitRouteCount = Math.min(
+          splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination),
+          totalSplitRoutes
+        );
+        splitAutoCheckedRouteCount.current = initialSplitRouteCount;
+        const prioritySplitRoutes = newSplits.slice(0, initialSplitRouteCount);
+        queueLiveHydration(
+          [
+            ...prioritySplitRoutes.flatMap((route: any) => [route.leg1, route.leg2]),
+          ],
+          { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
+          requestId,
+          hydrationId,
+          `first ${initialSplitRouteCount} split options`,
+          Number.POSITIVE_INFINITY
+        );
+      }
+
       if (requestId === searchRequestId.current && directCountForRequest === 0 && splitCountForRequest > 0) {
         setResultMode("split");
       }
@@ -1478,15 +1576,15 @@ export function SeatCalendarStrip({ train, classType }: { train: any; classType:
     );
   }
   return (
-    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
+    <div className="grid gap-2 grid-cols-4 sm:grid-cols-6 lg:grid-cols-10 xl:grid-cols-12">
       {calendar.map((item: any, index: number) => {
         const status = readableRailStatus(item.text || item.availabilityText || item.status || train.availability);
         const fare = item.fare ? `₹${String(item.fare).replace(/^₹/, "")}` : compactFareText(liveFareText(train));
         return (
-          <div key={`${item.date || index}-${status}`} className={`rounded-2xl border p-3 ${availabilityTone(status)}`}>
-            <div className="text-[10px] font-black uppercase opacity-70">{item.date || prettyDateLabel(todayIso(index))}</div>
-            <div className="mt-1 text-sm font-black">{status}</div>
-            <div className="mt-1 text-xs font-black opacity-80">{fare}</div>
+          <div key={`${item.date || index}-${status}`} className={`rounded-2xl border p-2 ${availabilityTone(status)}`}>
+            <div className="text-[9px] font-black uppercase opacity-70">{item.date || prettyDateLabel(todayIso(index))}</div>
+            <div className="mt-1 text-xs font-black">{status}</div>
+            <div className="mt-1 text-[10px] font-black opacity-80">{fare}</div>
           </div>
         );
       })}

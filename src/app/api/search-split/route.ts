@@ -44,20 +44,21 @@ export async function POST(request: Request) {
     const coverageMode = "quick" as const;
     const plannerOptions = {
       debug: Boolean(debug),
-      fetchLive: true,
-      liveLookupLimit: 12,
+      fetchLive: false,
+      liveLookupLimit: 0,
       coverageMode,
       exactStationOnly: false,
-      providerPairLimit: 5,
-      maxSplitHubs: 80,
-      maxSplitLegOptions: 18,
-      maxSplitCandidates: 800,
-      maxSplitResults: 15,
+      providerPairLimit: 8,
+      maxSplitHubs: 140,
+      maxSplitLegOptions: 24,
+      maxSplitCandidates: 1200,
+      maxSplitResults: 25,
       maxMultiPlans: 0,
       maxMultiLegOptions: 0,
       maxMultiCandidates: 0,
       maxMultiResults: 0,
-      plannerLegTimeoutMs: 3500,
+      plannerLegTimeoutMs: 2200,
+      globalTimeoutMs: 9000,
     } as const;
 
     const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);

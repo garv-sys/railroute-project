@@ -1368,7 +1368,7 @@ async function generate6DayAvailability(
 
   if (scheduleOnly) {
     const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
-    for (let j = 0; j < 6; j++) {
+    for (let j = 0; j < 60; j++) {
       const dj = new Date(baseDate.getTime());
       dj.setDate(dj.getDate() + j);
       list.push(unavailableRow(
@@ -1405,7 +1405,7 @@ async function generate6DayAvailability(
 
   if (isMockTrain) {
     const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
-    for (let j = 0; j < 6; j++) {
+    for (let j = 0; j < 60; j++) {
       const dj = new Date(baseDate.getTime());
       dj.setDate(dj.getDate() + j);
       const jsDay = dj.getDay();
@@ -1500,7 +1500,7 @@ async function generate6DayAvailability(
     if (!availData || availData.success === false) {
       const errorMsg = availData?.error || 'Provider check failed';
       if (!isDemoMode) {
-        for (let j = 0; j < 6; j++) {
+        for (let j = 0; j < 60; j++) {
           const dj = new Date(baseDate.getTime());
           dj.setDate(dj.getDate() + j);
           const jsDay = dj.getDay();
@@ -1521,7 +1521,7 @@ async function generate6DayAvailability(
       }
       
       const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
-      for (let j = 0; j < 6; j++) {
+      for (let j = 0; j < 60; j++) {
         const dj = new Date(baseDate.getTime());
         dj.setDate(dj.getDate() + j);
         const jsDay = dj.getDay();
@@ -1555,7 +1555,7 @@ async function generate6DayAvailability(
       const fareObj = availData.data.fare ?? {};
       const totalFare = Number(String(fareObj.totalFare ?? fareObj.Fare ?? fareObj.Amount ?? '').replace(/[^\d.]/g, '')) || 0;
 
-      for (let j = 0; j < 6; j++) {
+      for (let j = 0; j < 60; j++) {
         const dj = new Date(baseDate.getTime());
         dj.setDate(dj.getDate() + j);
 
@@ -1725,7 +1725,7 @@ async function generate6DayAvailability(
       return list;
     } else {
       if (!isDemoMode) {
-        for (let j = 0; j < 6; j++) {
+        for (let j = 0; j < 60; j++) {
           const dj = new Date(baseDate.getTime());
           dj.setDate(dj.getDate() + j);
           const jsDay = dj.getDay();
@@ -1745,7 +1745,7 @@ async function generate6DayAvailability(
         return list;
       }
       const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
-      for (let j = 0; j < 6; j++) {
+      for (let j = 0; j < 60; j++) {
         const dj = new Date(baseDate.getTime());
         dj.setDate(dj.getDate() + j);
         const jsDay = dj.getDay();
@@ -1776,7 +1776,7 @@ async function generate6DayAvailability(
     console.warn(`[IRCTC] Availability check failed for ${trainNo}`, error?.message || error);
     const isDemoMode = false;
     if (!isDemoMode) {
-      for (let j = 0; j < 6; j++) {
+      for (let j = 0; j < 60; j++) {
         const dj = new Date(baseDate.getTime());
         dj.setDate(dj.getDate() + j);
         const jsDay = dj.getDay();
@@ -1796,7 +1796,7 @@ async function generate6DayAvailability(
       return list;
     }
     const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
-    for (let j = 0; j < 6; j++) {
+    for (let j = 0; j < 60; j++) {
       const dj = new Date(baseDate.getTime());
       dj.setDate(dj.getDate() + j);
       const jsDay = dj.getDay();
@@ -2520,15 +2520,15 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 
     // Check hubs in bounded parallel batches. Train-list calls are cached and
     // cheaper than availability calls, so this keeps broad routes responsive.
-    const splitHubBatchSize = isFullCoverage(options) ? 16 : 12;
+    const splitHubBatchSize = isFullCoverage(options) ? 20 : 20;
     for (let i = 0; i < hubsToTry.length; i += splitHubBatchSize) {
-      if (Date.now() - startSmartTime > (options.globalTimeoutMs || 15000)) {
+      if (Date.now() - startSmartTime > (options.globalTimeoutMs || 10000)) {
         console.warn(`[smart-search] Hub search exceeded global timeout. Returning ${potentialRoutes.length} potential routes.`);
         break;
       }
       if (!isFullCoverage(options) && (potentialRoutes.length >= quickPotentialLimit || enoughQuickPotential())) break;
       if (i > 0) {
-        await providerPaceDelay(options.liveLookupDelayMs ?? 150);
+        await providerPaceDelay(options.liveLookupDelayMs ?? 50);
       }
       const batch = hubsToTry.slice(i, i + splitHubBatchSize);
       await Promise.all(batch.map(async (hub) => {
@@ -2570,7 +2570,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
             filteredL2.sort(sortLogic);
 
             let routesForHub = 0;
-            const maxRoutesPerHub = isFullCoverage(options) ? 100 : 8;
+            const maxRoutesPerHub = isFullCoverage(options) ? 100 : 15;
 
             // Explore the provider grid until quick mode has enough route shapes.
             routeGrid:
@@ -2703,13 +2703,13 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     const requireVerifiedLiveSplit = false;
 
     // Process route candidates in parallel batches to speed up
-    const candidateBatchSize = isFullCoverage(options) ? 4 : 8;
+    const candidateBatchSize = isFullCoverage(options) ? 6 : 12;
     for (let idx = 0; idx < potentialRoutes.length; idx += candidateBatchSize) {
       if (validRoutes.length >= splitResultLimit) break;
       const batch = potentialRoutes.slice(idx, idx + candidateBatchSize);
       
       const elapsed = Date.now() - startSmartTime;
-      const timeoutLimit = options.globalTimeoutMs || 15000;
+      const timeoutLimit = options.globalTimeoutMs || 10000;
       const isRunningLowOnTime = elapsed > (timeoutLimit - 3000);
       if (elapsed > timeoutLimit) {
         console.warn(`[smart-search] Verification exceeded global timeout (${elapsed}ms > ${timeoutLimit}ms). Filling remaining ${splitResultLimit - validRoutes.length} slots statically.`);

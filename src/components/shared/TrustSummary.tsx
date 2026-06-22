@@ -1197,8 +1197,7 @@ export function dedupeSplitRoutes(splits: any[]) {
 export function classCalendarFor(train: any, classType = "3A") {
   const activeClass = train?.classAvailability?.[classType] ? classType : train?.classType || "3A";
   const existing = train?.classAvailability?.[activeClass] || [];
-  if (existing.length) return existing.slice(0, 7);
-  return [];
+  return existing.slice(0, 60);
 }
 
 export function fullStationLabelFromCode(code: unknown, withCode = true) {
