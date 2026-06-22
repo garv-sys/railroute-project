@@ -86,14 +86,25 @@ export async function POST(request: Request) {
     });
 
     const liveEnrichResults = await Promise.allSettled(liveEnrichPromises);
+    let liveFulfilled = 0;
+    let liveRejected = 0;
+    let liveRejectReasons: string[] = [];
     for (let i = 0; i < LIVE_TOP_N; i++) {
       const leg1Result = liveEnrichResults[i * 2];
       const leg2Result = liveEnrichResults[i * 2 + 1];
       if (leg1Result.status === 'fulfilled' && leg1Result.value?.trainNo) {
+        liveFulfilled++;
         splitRoutes[i].leg1 = leg1Result.value;
+      } else {
+        liveRejected++;
+        if (leg1Result.status === 'rejected') liveRejectReasons.push(String(leg1Result.reason || '').slice(0, 100));
       }
       if (leg2Result.status === 'fulfilled' && leg2Result.value?.trainNo) {
+        liveFulfilled++;
         splitRoutes[i].leg2 = leg2Result.value;
+      } else {
+        liveRejected++;
+        if (leg2Result.status === 'rejected') liveRejectReasons.push(String(leg2Result.reason || '').slice(0, 100));
       }
       const leg1Avail = String(splitRoutes[i].leg1?.availability || splitRoutes[i].leg1?.classAvailability?.[classType]?.[0]?.text || '');
       const leg2Avail = String(splitRoutes[i].leg2?.availability || splitRoutes[i].leg2?.classAvailability?.[classType]?.[0]?.text || '');
@@ -134,7 +145,14 @@ export async function POST(request: Request) {
       data: { splitRoutes, multiSplitRoutes, routeRecommendation },
       meta,
       requestId,
-      extra: { splitRoutes, multiSplitRoutes, routeRecommendation, coverageMode, canExpand: splitRoutes.length >= plannerOptions.maxSplitResults },
+      extra: { 
+        splitRoutes, 
+        multiSplitRoutes, 
+        routeRecommendation, 
+        coverageMode, 
+        canExpand: splitRoutes.length >= plannerOptions.maxSplitResults,
+        debugLive: { liveFulfilled, liveRejected, liveRejectReasons: liveRejectReasons.slice(0, 5) }
+      },
     });
   } catch (error: any) {
     console.error('Search Split API Error:', error);
