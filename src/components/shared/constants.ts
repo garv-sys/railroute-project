@@ -60,13 +60,13 @@ export const DEFAULT_SOURCE_CODE = "";
 export const DEFAULT_DESTINATION_CODE = "";
 export const DEFAULT_VIA_CODE = "";
 
-export const AUTO_LIVE_DIRECT_LIMIT = 5;
-export const SPLIT_AUTO_LIVE_ROUTE_COUNT = 3;
+export const AUTO_LIVE_DIRECT_LIMIT = 30;
+export const SPLIT_AUTO_LIVE_ROUTE_COUNT = 12;
 export const SPLIT_PREVIEW_ROUTE_COUNT = 15;
 export const LONG_JOURNEY_DISTANCE_KM = 1000;
 export const LONG_JOURNEY_MIN_VERIFIED_SPLITS = 15;
-export const LONG_JOURNEY_SPLIT_AUTO_LIVE_ROUTE_COUNT = 3;
-export const LONG_JOURNEY_SPLIT_TOP_UP_ROUTE_COUNT = 3;
+export const LONG_JOURNEY_SPLIT_AUTO_LIVE_ROUTE_COUNT = 12;
+export const LONG_JOURNEY_SPLIT_TOP_UP_ROUTE_COUNT = 12;
 export const EMPTY_ROUTE: any[] = [];
 
 export const quotaOptions = fareQuotaOptions;

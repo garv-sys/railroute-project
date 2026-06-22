@@ -632,20 +632,16 @@ export function TrainResultsWorkspace() {
             splits: splitRoutes,
             multiSplits: multiSplitRoutes,
           }));
-          const initialSplitRouteCount = Math.min(
-            splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination),
-            splitRoutes.length
-          );
-          splitAutoCheckedRouteCount.current = initialSplitRouteCount;
-          const prioritySplitRoutes = splitRoutes.slice(0, initialSplitRouteCount);
+          // Queue live hydration for top 12 split routes (prevent rate limiting)
+          const liveLimit = splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination);
+          const priorityRoutes = splitRoutes.slice(0, liveLimit);
+          splitAutoCheckedRouteCount.current = priorityRoutes.length;
           queueLiveHydration(
-            [
-              ...prioritySplitRoutes.flatMap((route: any) => [route.leg1, route.leg2]),
-            ],
+            priorityRoutes.flatMap((route: any) => [route.leg1, route.leg2].filter(Boolean)),
             { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
             requestId,
             hydrationId,
-            `first ${initialSplitRouteCount} split options`,
+            `top ${priorityRoutes.length} split routes live`,
             Number.POSITIVE_INFINITY
           );
           return { splitRoutes, multiSplitRoutes };
@@ -748,21 +744,16 @@ export function TrainResultsWorkspace() {
           multiSplits: newMultiSplits,
         }));
 
-        const totalSplitRoutes = newSplits.length;
-        const initialSplitRouteCount = Math.min(
-          splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination),
-          totalSplitRoutes
-        );
-        splitAutoCheckedRouteCount.current = initialSplitRouteCount;
-        const prioritySplitRoutes = newSplits.slice(0, initialSplitRouteCount);
+        // Queue live hydration for top 12 merged split routes
+        const mergedLiveLimit = splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination);
+        const priorityMergedRoutes = newSplits.slice(0, mergedLiveLimit);
+        splitAutoCheckedRouteCount.current = priorityMergedRoutes.length;
         queueLiveHydration(
-          [
-            ...prioritySplitRoutes.flatMap((route: any) => [route.leg1, route.leg2]),
-          ],
+          priorityMergedRoutes.flatMap((route: any) => [route.leg1, route.leg2].filter(Boolean)),
           { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
           requestId,
           hydrationId,
-          `first ${initialSplitRouteCount} split options`,
+          `top ${priorityMergedRoutes.length} merged split routes live`,
           Number.POSITIVE_INFINITY
         );
       }
@@ -1341,6 +1332,7 @@ export function TrainResultsWorkspace() {
                     journeyDate={date}
                     requestedClass={classType}
                     quota={quota}
+                    autoFetchLive={index < splitAutoLiveRouteCountForJourney(source, destination)}
                   />
                 ))}
               </>
@@ -2694,15 +2686,15 @@ export function SplitJourneyCard({
   const leg1LiveFare = fareToNumber(leg1LiveQuotes[leg1Class]?.fare) || fareToNumber(Object.values(leg1LiveQuotes)[0]?.fare);
   const leg2LiveFare = fareToNumber(leg2LiveQuotes[leg2Class]?.fare) || fareToNumber(Object.values(leg2LiveQuotes)[0]?.fare);
   const liveTotalFare = leg1LiveFare > 0 && leg2LiveFare > 0 ? leg1LiveFare + leg2LiveFare : 0;
-  const estimatedSplitFare = estimatedFareAmount(leg1, leg1Class) + estimatedFareAmount(leg2, leg2Class);
-  const rawTotalFare = fareToNumber(split.totalFare);
+  // Show Fetching... while ClassRateStrip hasn't yet returned quotes for both legs
+  const leg1Loaded = Object.keys(leg1LiveQuotes).length > 0;
+  const leg2Loaded = Object.keys(leg2LiveQuotes).length > 0;
+  const bothLoaded = leg1Loaded && leg2Loaded;
   const totalFareText = liveTotalFare > 0
-    ? `₹${liveTotalFare}`
-    : rawTotalFare > 0
-      ? `~₹${rawTotalFare} est.`
-      : estimatedSplitFare > 0
-        ? `~₹${estimatedSplitFare} est.`
-        : "Check Fare";
+    ? `₹${liveTotalFare.toLocaleString("en-IN")}`
+    : autoFetchLive && !bothLoaded
+      ? "Fetching..."
+      : "Check Fare";
 
   function selectedClassForLeg(leg: any) {
     if (classPanel && classPanel.train?.trainNo === leg.trainNo && classPanel.train?.source === leg.source && classPanel.train?.destination === leg.destination) {
@@ -2711,17 +2703,16 @@ export function SplitJourneyCard({
     return scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
   }
 
-  function legFareText(leg: any, fallbackFare: unknown) {
-    // Check live quotes fetched from ClassRateStrip first
+  function legFareText(leg: any, _fallbackFare: unknown) {
+    // Only show live fare — no estimates
     const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
     const localQuotes = legQuotes[String(leg?.trainNo || "")] || {};
     const localFare = fareToNumber(localQuotes[legClass]?.fare) || fareToNumber(Object.values(localQuotes)[0]?.fare);
-    if (localFare > 0) return `₹${localFare}`;
+    if (localFare > 0) return `₹${localFare.toLocaleString("en-IN")}`;
     if (trainFareAmount(leg) > 0) return liveFareText(leg);
-    if (fareToNumber(fallbackFare) > 0) return `~₹${fareToNumber(fallbackFare)} est.`;
-    const est = estimatedFareAmount(leg, legClass);
-    if (est > 0) return `~₹${est} est.`;
-    return "Check Fare";
+    // Still fetching live data
+    const isFetching = autoFetchLive && Object.keys(localQuotes).length === 0;
+    return isFetching ? "Fetching..." : "Check Fare";
   }
 
   function selectedClassCopy(leg: any, classCode: string) {
@@ -2941,11 +2932,6 @@ export function MultiSplitJourneyCard({
     : split.interchangeStations || [];
   const trustMeta = trustMetaFromTrain(legs[0] || {}, { splitRoute: true });
   const legTrust = legDataTrustCopy(legs, trustMeta);
-  const estimatedMultiFare = legs.reduce((sum: number, leg: any) => {
-    const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
-    return sum + estimatedFareAmount(leg, legClass);
-  }, 0);
-  const rawTotalFare = fareToNumber(split.totalFare);
   // Compute live total from ClassRateStrip quotes when all legs have data
   const liveTotalFareFromQuotes = (() => {
     let total = 0;
@@ -2958,13 +2944,12 @@ export function MultiSplitJourneyCard({
     }
     return total;
   })();
+  const anyLegFetching = autoFetchLive && legs.some((leg: any) => Object.keys(legQuotes[String(leg?.trainNo || "")] || {}).length === 0);
   const totalFareText = liveTotalFareFromQuotes > 0
-    ? `₹${liveTotalFareFromQuotes}`
-    : rawTotalFare > 0
-      ? `~₹${rawTotalFare} est.`
-      : estimatedMultiFare > 0
-        ? `~₹${estimatedMultiFare} est.`
-        : "Check Fare";
+    ? `₹${liveTotalFareFromQuotes.toLocaleString("en-IN")}`
+    : anyLegFetching
+      ? "Fetching..."
+      : "Check Fare";
 
   function isSelectedRouteLeg(leg: any) {
     return Boolean(
