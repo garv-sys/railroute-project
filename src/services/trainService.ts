@@ -3,6 +3,14 @@ import MAJOR_HUBS from '@/data/major_hubs.json';
 import MAJOR_TRAIN_ROUTES from '@/data/major_train_routes.json';
 import { buildTrustMeta } from '@/lib/confidence';
 import { STATION_COORDS } from '@/lib/railway-intelligence';
+import ALL_STATIONS_RAW from '@/data/all_stations.json';
+// Build a code→coord map from all_stations.json for small-station coordinate lookups
+const ALL_STATION_COORD_MAP: Record<string, { lat: number; lon: number }> = {};
+for (const s of ALL_STATIONS_RAW as Array<{ code?: string; lat?: number; lon?: number }>) {
+  if (s.code && typeof s.lat === 'number' && typeof s.lon === 'number') {
+    ALL_STATION_COORD_MAP[s.code.toUpperCase().trim()] = { lat: s.lat, lon: s.lon };
+  }
+}
 import {
   availabilityReasonForStatus,
   fareReasonForStatus,
@@ -181,6 +189,7 @@ type TrainSearchOptions = {
   maxMultiResults?: number;
   plannerLegTimeoutMs?: number;
   globalTimeoutMs?: number;
+  fetchAllClasses?: boolean;
 };
 
 export interface SplitRouteResult {
@@ -357,7 +366,14 @@ function providerClassesForTrain(train: any) {
     return String(value || '').split(/[,/| ]+/);
   }).map((value) => String(value).toUpperCase().trim()).filter((value) => known.has(value));
   const result = Array.from(new Set(parsed));
-  return result.length ? result : ['2A', '3A', 'SL'];
+  if (result.length) return result;
+
+  const name = String(train?.train_name || train?.trainName || '').toUpperCase();
+  const isSeatedOnly = /SHATABDI|VANDE BHARAT|VANDEBHARAT|JAN SHATABDI|DOUBLE DECKER|DOUBLEDECKER|INTERCITY/.test(name);
+  if (isSeatedOnly) {
+    return ['EC', 'CC', '2S'];
+  }
+  return ['2A', '3A', 'SL'];
 }
 
 const STANDARD_LONG_DISTANCE_CLASSES = ['1A', '2A', '3A', '3E', 'SL'];
@@ -643,10 +659,12 @@ function trainMatchesRequestedLeg(train: any, source: string, dest: string) {
 }
 
 const CITY_TERMINAL_CLUSTERS: Record<string, string[]> = {
-  PNBE: ['PNBE', 'DNR', 'PPTA', 'RJPB'],
-  DNR: ['DNR', 'PNBE', 'PPTA', 'RJPB'],
-  PPTA: ['PPTA', 'PNBE', 'DNR', 'RJPB'],
-  RJPB: ['RJPB', 'PNBE', 'DNR', 'PPTA'],
+  PNBE: ['PNBE', 'DNR', 'PPTA', 'RJPB', 'HJP', 'CPR'],
+  DNR: ['DNR', 'PNBE', 'PPTA', 'RJPB', 'HJP', 'CPR'],
+  PPTA: ['PPTA', 'PNBE', 'DNR', 'RJPB', 'HJP', 'CPR'],
+  RJPB: ['RJPB', 'PNBE', 'DNR', 'PPTA', 'HJP', 'CPR'],
+  HJP: ['HJP', 'PNBE', 'DNR', 'PPTA', 'RJPB', 'CPR'],
+  CPR: ['CPR', 'PNBE', 'DNR', 'PPTA', 'RJPB', 'HJP'],
   INDB: ['INDB', 'LMNR', 'UJN'],
   LMNR: ['LMNR', 'INDB', 'UJN'],
   UJN: ['UJN', 'INDB', 'LMNR'],
@@ -861,7 +879,7 @@ function terminalClusterFor(code: string) {
   return CITY_TERMINAL_CLUSTERS[code] || [code];
 }
 
-function sameAreaTerminalClusterFor(code: string, maxKm = 45) {
+function sameAreaTerminalClusterFor(code: string, maxKm = 60) {
   const normalized = normalizeStationCode(code);
   const cluster = terminalClusterFor(normalized);
   const coord = stationCoordinatesForRouting(normalized);
@@ -1034,7 +1052,7 @@ const MAJOR_HUB_LIST: MajorHub[] = Array.from(
 const MAJOR_HUB_BY_CODE = new Map(MAJOR_HUB_LIST.map((hub) => [hub.code, hub]));
 const NATIONAL_LONG_DISTANCE_SPLIT_HUBS = [
   // Eastern Corridor
-  'DDU', 'MGS', 'BSB', 'BSBS', 'PRYJ', 'GAYA', 'DHN', 'ASN', 'TATA', 'RNC', 'ROU', 'HWH', 'BBS',
+  'DDU', 'MGS', 'BSB', 'BSBS', 'PRYJ', 'GAYA', 'DHN', 'ASN', 'TATA', 'RNC', 'ROU', 'HWH', 'BBS', 'DNR', 'PNBE',
   // Central India
   'CNB', 'LKO', 'LJN', 'NDLS', 'NZM', 'DLI', 'ANVT', 'DEE', 'AGC', 'JHS', 'VGLJ', 'MTJ',
   // West & NW India / Rajasthan
@@ -1060,6 +1078,11 @@ export function stationCoordinatesForRouting(code: string) {
     const hub = MAJOR_HUB_BY_CODE.get(terminal);
     if (hub) return { lat: hub.lat, lon: hub.lon };
   }
+
+  // Final fallback: use all_stations.json coordinates (covers every station including small ones)
+  const allStationCoord = ALL_STATION_COORD_MAP[normalized];
+  if (allStationCoord) return allStationCoord;
+
   return null;
 }
 
@@ -1129,20 +1152,33 @@ export function isHubOnPath(source: { lat: number; lon: number }, hub: { lat: nu
   let diff = Math.abs(directBearing - hubBearing);
   if (diff > 180) diff = 360 - diff;
   
-  // Use 120° tolerance (was 90°) — long diagonal routes like CKP→JP have many
-  // valid hubs (DDU, PRYJ, NDLS) that sit slightly off the direct bearing.
-  return diff <= 120;
+  // Use 150° tolerance — long diagonal routes like CKP→JP, PNBE→JP have many
+  // valid hubs that sit slightly off the direct bearing.
+  return diff <= 150;
 }
 
 const USER_PRIORITY_HUBS = new Set([
+  // Primary hubs — always explored
   'DDU', 'MGS',
-  'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE', 'DEC', 'GGN',
   'PRYJ', 'ALD', 'PRRB', 'PCOI', 'SFG',
-  'LKO', 'LJN',
   'CNB',
+  'LKO', 'LJN',
+  'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE', 'DEC', 'GGN',
+  'DNR', 'PNBE',
+  'GAYA',
+  'JBP', 'BPL', 'HBJ', 'RKMP',
+  'KOTA',
+  'AGC', 'MTJ',
   'BSB', 'BSBS',
-  'JP', 'KOTA', 'AII', 'AWR', 'AJM', 'MTJ', 'BKN', 'JU', 'UDZ',
-  'ROU', 'JSG', 'BSP', 'R', 'DURG', 'KTE', 'KMZ', 'JBP', 'ET', 'BPL', 'HBJ', 'RKMP', 'NGP', 'GWL', 'VGLJ', 'JHS'
+  'JP', 'AII', 'AWR', 'AJM', 'BKN', 'JU', 'UDZ',
+  // Secondary hubs
+  'ASN', 'HWH', 'TATA', 'RNC',
+  'BSP', 'R', 'DURG',
+  'NGP',
+  'ET',
+  'UJN',
+  'RTM', 'SWM',
+  'ROU', 'JSG', 'KTE', 'KMZ', 'GWL', 'VGLJ', 'JHS',
 ]);
 
 export function dynamicSplitHubCandidates(source: string, dest: string, preferredHub = '', limit = Number.POSITIVE_INFINITY) {
@@ -1835,9 +1871,9 @@ async function generate6DayAvailability(
 
 // Enriches a train with provider availability and lightweight display metadata.
 export async function enrichWithLiveAvailability(train: any, date: string, classType: string, options: TrainSearchOptions = {}): Promise<TrainResult> {
-  const trainNo = train.train_no || train.train_number || train.trainno || train.trainNumber;
-  const source = train.from_stn_code || train.from_station_code || train.fromStnCode || train.train_src || train.source;
-  const destination = train.to_stn_code || train.to_station_code || train.toStnCode || train.train_dstn || train.dest;
+  const trainNo = train.trainNo || train.train_no || train.train_number || train.trainno || train.trainNumber;
+  const source = train.trainSource || train.train_src || train.from_stn_code || train.from_station_code || train.fromStnCode || train.source;
+  const destination = train.trainDestination || train.train_dstn || train.destination || train.to_stn_code || train.to_station_code || train.toStnCode || train.dest;
   const departureTime = train.from_time || train.from_std || train.departureTime;
   const arrivalTime = train.to_time || train.to_sta || train.arrivalTime;
   const duration = train.travel_time || train.duration || 'N/A';
@@ -1960,9 +1996,14 @@ export async function enrichWithLiveAvailability(train: any, date: string, class
         ...classesToRender,
         ...(effectiveTargetClass ? [effectiveTargetClass] : []),
       ]))
-    : Array.from(new Set([
-        resolveLiveClass(effectiveTargetClass || requestedClass),
-      ]));
+    : options.fetchAllClasses
+      ? Array.from(new Set([
+          resolveLiveClass(effectiveTargetClass || requestedClass),
+          ...classesToRender,
+        ]))
+      : Array.from(new Set([
+          resolveLiveClass(effectiveTargetClass || requestedClass),
+        ]));
   await Promise.all(classesToCheck.map(async (cls) => {
     // Use the provider's actual station codes (from_stn_code / to_stn_code) for the
     // availability API call, NOT the user-requested stations. When a user queries NDLS
@@ -2265,6 +2306,17 @@ export async function checkDirectTrains(source: string, dest: string, date: stri
     if (options.fetchLive !== false) {
       const cleanClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
       validEnrichedTrains = validEnrichedTrains.filter((t) => {
+        // If a class check returns "TRAIN NOT ON SCHEDULED DATE", "NOT RUNNING", or "CANCELLED", filter it out entirely!
+        const checkClass = cleanClass || t.classes?.[0] || t.classType || '3A';
+        const first = checkClass ? t.classAvailability?.[checkClass]?.[0] : undefined;
+        if (first?.availabilityStatus === 'VERIFIED') {
+          const text = String(first.text || first.status || t.availability || '').toUpperCase();
+          const reason = String(first.lookupReason || t.lookupReason || '').toUpperCase();
+          if (/train not on scheduled date|not running|cancelled/i.test(text) || /train not on scheduled date|not running|cancelled/i.test(reason)) {
+            return false;
+          }
+        }
+
         if (cleanClass) {
           // If the train statically doesn't run the requested class, filter it out.
           if (t.classes && t.classes.length > 0 && !t.classes.includes(cleanClass)) {
@@ -2398,8 +2450,8 @@ const cleanTrainNo = (num: any): string => {
 const directCheckCache = new Map<string, boolean>();
 
 function isTrainDirectBetweenAreas(stations: string[], source: string, dest: string): boolean {
-  const sourceCluster = sameAreaTerminalClusterFor(source, 45);
-  const destCluster = sameAreaTerminalClusterFor(dest, 45);
+  const sourceCluster = sameAreaTerminalClusterFor(source, 60);
+  const destCluster = sameAreaTerminalClusterFor(dest, 60);
   const sourceCoord = stationCoordinatesForRouting(source);
   const destCoord = stationCoordinatesForRouting(dest);
   
@@ -2416,13 +2468,13 @@ function isTrainDirectBetweenAreas(stations: string[], source: string, dest: str
     // Check geographical distance if coordinates are available
     if (!isSrcClose && sourceCoord) {
       const stCoord = stationCoordinatesForRouting(st);
-      if (stCoord && haversineKm(sourceCoord, stCoord) <= 45) {
+      if (stCoord && haversineKm(sourceCoord, stCoord) <= 60) {
         isSrcClose = true;
       }
     }
     if (!isDstClose && destCoord) {
       const stCoord = stationCoordinatesForRouting(st);
-      if (stCoord && haversineKm(destCoord, stCoord) <= 45) {
+      if (stCoord && haversineKm(destCoord, stCoord) <= 60) {
         isDstClose = true;
       }
     }
@@ -2495,7 +2547,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 
   const preferredHub = normalizeStationCode(preferredHubInput);
   const hasPreferredHub = Boolean(preferredHub && preferredHub !== source && preferredHub !== dest);
-  const splitHubLimit = quickLimit(options, options.maxSplitHubs, hasPreferredHub ? 35 : 30);
+  const splitHubLimit = quickLimit(options, options.maxSplitHubs, hasPreferredHub ? 15 : 12);
   const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 40);
   const splitCandidateLimit = quickLimit(options, options.maxSplitCandidates, 400);
   const splitResultLimit = quickLimit(options, options.maxSplitResults, isFullCoverage(options) ? 120 : 15);
@@ -2521,16 +2573,72 @@ export async function findSmartRoutes(source: string, dest: string, date: string
     // Dynamic hub extraction skipped in quick mode — getTrainSchedule adds latency per train.
     // Hub candidates from dynamicSplitHubCandidates() already cover the route corridor.
     hubsToTry = takeForCoverage(expandSplitHubAliases(prioritizePreferredHub(hubsToTry)), splitHubLimit);
+
+    // SMALL STATION PRE-RESOLUTION: Only for non-major-hub stations that IRCTC
+    // doesn't recognize as a valid search origin/destination.
+    // Major hubs (PNBE, NDLS, HWH, DDU, etc.) always search as themselves.
+    let effectiveSource = source;
+    let effectiveDest = dest;
+
+    const sourceIsMajorHub = MAJOR_HUB_BY_CODE.has(source);
+    const destIsMajorHub = MAJOR_HUB_BY_CODE.has(dest);
+
+    if (!sourceIsMajorHub || !destIsMajorHub) {
+      const probeHub = hubsToTry[0] || 'NDLS';
+      const [probeL1, probeL2] = await Promise.all([
+        !sourceIsMajorHub
+          ? plannerTimeout(searchTrainsSmart(source, probeHub, formattedDate, { ...legSearchOptions, providerPairLimit: 1 }), 2500, [])
+          : Promise.resolve([1]), // major hub — skip probe, treat as found
+        !destIsMajorHub
+          ? plannerTimeout(searchTrainsSmart(probeHub, dest, formattedDate, { ...legSearchOptions, providerPairLimit: 1 }), 2500, [])
+          : Promise.resolve([1]), // major hub — skip probe, treat as found
+      ]);
+
+      if (!sourceIsMajorHub && probeL1.length === 0) {
+        const nearbySourceHubs = nearbyMajorHubsForStation(source, 15, 150)
+          .filter(h => h !== probeHub && h !== dest);
+        for (const altSrc of nearbySourceHubs.slice(0, 2)) {
+          const altProbe = await plannerTimeout(
+            searchTrainsSmart(altSrc, probeHub, formattedDate, { ...legSearchOptions, providerPairLimit: 1 }),
+            2000, []
+          );
+          if (altProbe.length > 0) {
+            console.log(`[smart-search] Small station: resolved ${source} → ${altSrc}`);
+            effectiveSource = altSrc;
+            break;
+          }
+        }
+      }
+
+      if (!destIsMajorHub && probeL2.length === 0) {
+        const nearbyDestHubs = nearbyMajorHubsForStation(dest, 15, 150)
+          .filter(h => h !== probeHub && h !== source && h !== effectiveSource);
+        for (const altDst of nearbyDestHubs.slice(0, 2)) {
+          const altProbe = await plannerTimeout(
+            searchTrainsSmart(probeHub, altDst, formattedDate, { ...legSearchOptions, providerPairLimit: 1 }),
+            2000, []
+          );
+          if (altProbe.length > 0) {
+            console.log(`[smart-search] Small station: resolved ${dest} → ${altDst}`);
+            effectiveDest = altDst;
+            break;
+          }
+        }
+      }
+    }
+
     let potentialRoutes: any[] = [];
     const enoughQuickPotential = () => {
       if (isFullCoverage(options)) return false;
       const uniqueHubs = new Set(potentialRoutes.map((route) => route.hub)).size;
-      return potentialRoutes.length >= Math.min(80, quickPotentialLimit) && uniqueHubs >= 6;
+      // Require at least 120 candidates and 5 unique hubs before stopping early
+      return potentialRoutes.length >= Math.min(120, quickPotentialLimit) && uniqueHubs >= 5;
     };
+
 
     // Check hubs in bounded parallel batches. Train-list calls are cached and
     // cheaper than availability calls, so this keeps broad routes responsive.
-    const splitHubBatchSize = isFullCoverage(options) ? 20 : 20;
+    const splitHubBatchSize = isFullCoverage(options) ? 6 : 3;
     for (let i = 0; i < hubsToTry.length; i += splitHubBatchSize) {
       if (Date.now() - startSmartTime > (options.globalTimeoutMs || 10000)) {
         console.warn(`[smart-search] Hub search exceeded global timeout. Returning ${potentialRoutes.length} potential routes.`);
@@ -2553,8 +2661,8 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	          ];
 	          const [l1Trains, ...l2TrainGroups] = await plannerTimeout(
 	            Promise.all([
-	              searchTrainsSmart(source, hub, formattedDate, legSearchOptions),
-	              ...secondLegDates.map((legDate) => searchTrainsSmart(hub, dest, legDate, legSearchOptions))
+	              searchTrainsSmart(effectiveSource, hub, formattedDate, legSearchOptions),
+	              ...secondLegDates.map((legDate) => searchTrainsSmart(hub, effectiveDest, legDate, legSearchOptions))
 	            ]),
 	            options.plannerLegTimeoutMs,
 	            [[], ...secondLegDates.map(() => [])] as any[][]
@@ -2563,8 +2671,8 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 
             // Filter out trains already known to be direct (from directTrainNos set built above).
             // isDirectTrainEver() is skipped here — it fires getTrainSchedule per train (too slow).
-            const filteredL1 = l1Trains.filter(t => !directTrainNos.has(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
-            const filteredL2 = l2Trains.filter(t => !directTrainNos.has(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+            const filteredL1 = l1Trains.filter((t: any) => !directTrainNos.has(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+            const filteredL2 = l2Trains.filter((t: any) => !directTrainNos.has(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
 
           const sortLogic = (a: any, b: any) => {
             const aDaily = a.running_days === '1111111' ? 1 : 0;
@@ -2645,8 +2753,15 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	                      ? 8.0
 	                      : 6.0;
 
-                // LAYOVER WINDOW: 1h to maxLayover for optimal transition
-                if (layoverHours >= 1.0 && layoverHours <= maxLayover) {
+                // LAYOVER WINDOW: 45m (0.75h) to maxLayover for optimal transition
+                if (layoverHours >= 0.75 && layoverHours <= maxLayover) {
+                  let layoverScoreAdjust = 0;
+                  if (layoverHours >= 0.75 && layoverHours <= 3.0) {
+                    layoverScoreAdjust += 30; // prefer 45m to 3h
+                  } else if (layoverHours > 8.0) {
+                    layoverScoreAdjust -= 30; // penalize over 8h
+                  }
+
                   potentialRoutes.push({
                     hub,
 	                    t1,
@@ -2658,7 +2773,7 @@ export async function findSmartRoutes(source: string, dest: string, date: string
 	                    leg2DepartureDate: railDateToIso(resolvedLeg2Date),
 	                    layoverHours,
 	                    layoverDuration: formatDuration(depMs - arrivalMs),
-	                    score: 100 - (layoverHours * 4) + (hub === preferredHub ? 45 : 0) + (isMajorHub ? 10 : 0) + trainServiceQualityBoost(t1) + trainServiceQualityBoost(t2),
+	                    score: 100 - (layoverHours * 4) + layoverScoreAdjust + (hub === preferredHub ? 45 : 0) + (isMajorHub ? 10 : 0) + trainServiceQualityBoost(t1) + trainServiceQualityBoost(t2),
 	                    _isHeritage: isHeritageLeg2
                   });
                   routesForHub++;

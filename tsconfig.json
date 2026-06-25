@@ -31,5 +31,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "railroute-project", "railroute-project 2", "splitrailway", "railroute-project-updated.zip", "railroute-project.zip"]
+  "exclude": ["node_modules", "railroute-project", "railroute-project 2", "splitrailway", "railroute-project-updated.zip", "railroute-project.zip", "test_*.ts", "*.test.ts"]
 }

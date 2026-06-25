@@ -48,12 +48,12 @@ const providerCache = new ProviderCache({
 });
 
 const availabilityCache = new ProviderCache({
-  maxConcurrency: 8,
-  retryCount: 2,
-  retryDelayMs: 600,
+  maxConcurrency: 2,
+  retryCount: 0,
+  retryDelayMs: 1000,
   failureTtlMs: 0,
   staleWhileRevalidateMultiplier: 1,
-  timeoutMs: 5000,
+  timeoutMs: 7500,
   loggerPrefix: 'irctc-connect-availability',
 });
 
@@ -137,7 +137,7 @@ class APIQueue {
   }
 }
 
-const irctcQueue = new APIQueue(8, 80);
+const irctcQueue = new APIQueue(4, 200);
 const trainListQueue = new APIQueue(12, 40);
 let availabilityCooldownUntil = 0;
 let trainListCooldownUntil = 0;
@@ -330,22 +330,91 @@ export async function searchDirectTrains(fromStn: string, toStn: string, date?: 
   }, dynamicTtl);
 }
 
+export function normalizeClassForRapidAPI(cls: string): string {
+  const c = String(cls || "").toUpperCase().trim();
+  const mappings: Record<string, string> = {
+    'THIRD AC': '3A',
+    'SECOND AC': '2A',
+    'FIRST AC': '1A',
+    'SLEEPER': 'SL',
+    'CHAIR CAR': 'CC',
+    'EXECUTIVE CHAIR': 'EC',
+    '3 AC': '3A',
+    '2 AC': '2A',
+    '1 AC': '1A',
+    '3AC': '3A',
+    '2AC': '2A',
+    '1AC': '1A',
+    'A3': '3A',
+    'A2': '2A',
+    'A1': '1A',
+  };
+  return mappings[c] || c;
+}
+
 export async function checkSeatAvailability(trainNo: string, fromStn: string, toStn: string, date: string, classType: string, quota = 'GN') {
+  const normalizedClass = normalizeClassForRapidAPI(classType);
   const dateStr = normalizeDate(date);
-  const key = `avail_${trainNo}_${fromStn}_${toStn}_${dateStr}_${classType}_${quota}`;
+  const key = `avail_${trainNo}_${fromStn}_${toStn}_${dateStr}_${normalizedClass}_${quota}`;
   const dynamicTtl = isTodayOrTomorrow(dateStr) ? 30 * 1000 : 5 * 60 * 1000;
   return availabilityCache.fetch(key, async () => {
     ensureIrctcConfigured();
-    const response: any = await callWithRetry(
-      () => irctcQueue.add(() => trackProviderCall('availability', `${trainNo}:${fromStn}->${toStn}:${dateStr}:${classType}:${quota}`, () => getAvailability(trainNo, fromStn, toStn, dateStr, classType, quota))),
-      2,
-      'availability'
+
+    const doFetch = () => irctcQueue.add(() =>
+      trackProviderCall('availability', `${trainNo}:${fromStn}->${toStn}:${dateStr}:${normalizedClass}:${quota}`,
+        () => getAvailability(trainNo, fromStn, toStn, dateStr, normalizedClass, quota)
+      )
     );
-    const rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
-    const fare = response?.data?.fare;
-    if (!fare || rows.length === 0) {
-      console.log('[avail-debug]', { trainNo, fromStn, toStn, dateStr, classType, rowCount: rows?.length, fare: response?.data?.fare });
+
+    console.log('[live-check-debug] START', { trainNo, fromStn, toStn, date: dateStr, classType: normalizedClass, quota });
+
+    let response: any = await callWithRetry(doFetch, 2, 'availability');
+    let rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
+    let fareObj = response?.data?.fare;
+
+    console.log('[live-check-debug] RESPONSE', {
+      trainNo, fromStn, toStn, date: dateStr, classType: normalizedClass,
+      success: response?.success,
+      rowCount: rows.length,
+      fare: fareObj,
+      firstRow: rows[0] ?? null,
+      error: response?.error ?? null,
+    });
+
+    const hasNoFare = !fareObj || fareObj.totalFare === 0 || fareObj.Fare === 0 || fareObj.Amount === 0 || fareObj.total === 0;
+
+    // Retry once after 2 s if provider returned zero rows or undefined/0 fare
+    if ((rows.length === 0 || hasNoFare) && response?.success !== false) {
+      console.log('[fare-retry]', trainNo, fromStn, toStn, dateStr, normalizedClass);
+      await new Promise((r) => setTimeout(r, 2000));
+      response = await callWithRetry(doFetch, 2, 'availability');
+      rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
+      fareObj = response?.data?.fare;
+      console.log('[live-check-debug] RETRY RESPONSE', {
+        trainNo, fromStn, toStn, date: dateStr, classType: normalizedClass,
+        success: response?.success,
+        rowCount: rows.length,
+        fare: fareObj,
+        firstRow: rows[0] ?? null,
+      });
     }
+
+    const finalHasNoFare = !fareObj || fareObj.totalFare === 0 || fareObj.Fare === 0 || fareObj.Amount === 0 || fareObj.total === 0;
+
+    if (rows.length === 0 || finalHasNoFare) {
+      console.warn('[live-check-debug] Still empty after retry', { trainNo, fromStn, toStn, date: dateStr, classType: normalizedClass, rowCount: rows.length, fare: fareObj });
+      return {
+        success: false,
+        error: "Provider returned no data",
+        provider: response?.provider || 'irctc-connect',
+        data: {
+          availability: [],
+          fare: null,
+          lookupReason: "Provider returned no data"
+        }
+      };
+    }
+
     return {
       ...(response && typeof response === 'object' && !Array.isArray(response) ? response : {}),
       provider: response?.provider || 'irctc-connect',

@@ -23,6 +23,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: 
 }
 
 export async function POST(request: Request) {
+  const apiStartTime = Date.now();
   const requestId = `ss_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   const ip = getClientIp(request);
   if (isRateLimited(`ss_${ip}`, 15, 60 * 1000)) {
@@ -49,16 +50,16 @@ export async function POST(request: Request) {
       coverageMode,
       exactStationOnly: false,
       providerPairLimit: 8,
-      maxSplitHubs: 140,
-      maxSplitLegOptions: 24,
-      maxSplitCandidates: 1200,
-      maxSplitResults: 25,
+      maxSplitHubs: 200,
+      maxSplitLegOptions: 40,
+      maxSplitCandidates: 3000,
+      maxSplitResults: 50,
       maxMultiPlans: 0,
       maxMultiLegOptions: 0,
       maxMultiCandidates: 0,
       maxMultiResults: 0,
-      plannerLegTimeoutMs: 2200,
-      globalTimeoutMs: 9000,
+      plannerLegTimeoutMs: 3500,
+      globalTimeoutMs: 6000,
     } as const;
 
     const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);
@@ -76,67 +77,213 @@ export async function POST(request: Request) {
           []
         );
 
-    const LIVE_TOP_SPLIT = Math.min(2, splitRoutes.length);
-    if (LIVE_TOP_SPLIT > 0) {
-      const liveEnrichPromises = splitRoutes.slice(0, LIVE_TOP_SPLIT).flatMap((route) => {
-        const legDate = route.leg1Date || route.leg2Date || date;
-        return [
-          enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: false, liveLookupLimit: 2, debug: false }),
-          enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: false, liveLookupLimit: 2, debug: false }),
-        ];
-      });
-
-      const liveEnrichResults = await Promise.allSettled(liveEnrichPromises);
-      for (let i = 0; i < LIVE_TOP_SPLIT; i++) {
-        const leg1Result = liveEnrichResults[i * 2];
-        const leg2Result = liveEnrichResults[i * 2 + 1];
-        if (leg1Result.status === 'fulfilled' && leg1Result.value?.trainNo) {
-          splitRoutes[i].leg1 = leg1Result.value;
-        }
-        if (leg2Result.status === 'fulfilled' && leg2Result.value?.trainNo) {
-          splitRoutes[i].leg2 = leg2Result.value;
-        }
-      }
-    }
-
-    const splitBlocked = (route: any) => {
-      const leg1 = route.leg1 || {};
-      const leg2 = route.leg2 || {};
-      const leg1Status = String(leg1.availabilityStatus || leg1.status || '').toUpperCase();
-      const leg2Status = String(leg2.availabilityStatus || leg2.status || '').toUpperCase();
-      if (leg1Status === 'NOT_RUNNING' || leg2Status === 'NOT_RUNNING') return true;
-      if (leg1Status === 'PROVIDER_UNAVAILABLE' || leg2Status === 'PROVIDER_UNAVAILABLE') return true;
-      const leg1Text = String(leg1.availability || leg1.classAvailability?.[classType]?.[0]?.text || '').toLowerCase();
-      const leg2Text = String(leg2.availability || leg2.classAvailability?.[classType]?.[0]?.text || '').toLowerCase();
-      const blockedPatterns = ['not available for booking', 'not bookable', 'not running', 'class does not exist', 'booking/cancellation not allowed'];
-      for (const p of blockedPatterns) {
-        if (leg1Text.includes(p) || leg2Text.includes(p)) return true;
-      }
-      return false;
+    const isProviderBookingBlocked = (value: unknown) => {
+      return /not available for booking|not bookable|train not on scheduled date|not scheduled|not running|class does not exist|class not available|class not returned|does not exist in this train|cancelled/i.test(String(value || ""));
     };
 
-    const filteredSplitRoutes = splitRoutes.filter((route) => !splitBlocked(route));
+    const isLegVerifiedAndBookable = (leg: any) => {
+      if (!leg) return false;
+      const availabilityStatus = leg.availabilityStatus || 'NOT_CHECKED';
+      const fareStatus = leg.fareStatus || 'NOT_CHECKED';
+      
+      const fareStr = String(leg.fare || '');
+      const fare = Number(fareStr.replace(/[^\d.]/g, '')) || 0;
+
+      const availText = String(leg.availability || "").toUpperCase();
+      const reason = String(leg.lookupReason || "").toUpperCase();
+
+      if (isProviderBookingBlocked(availText) || isProviderBookingBlocked(reason)) {
+        return false;
+      }
+
+      const visibleSeatStatus = /\bAVAILABLE\b|\bAVL\b|RAC|WL|WAIT|REGRET|CNF|CONFIRM/.test(availText) &&
+        !/NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|NOT RUNNING|CLASS NOT AVAILABLE|CHECK SEATS|TAP TO CHECK|UNAVAILABLE/.test(availText);
+
+      return availabilityStatus === 'VERIFIED' && fareStatus === 'VERIFIED' && fare > 0 && visibleSeatStatus;
+    };
+
+    const cleanTrain = (no: string) => String(no || '').trim().replace(/\D/g, '');
+
+    const getDiverseSplitRoutes = (routes: any[], limit = 30) => {
+      const selected: any[] = [];
+      const trainCounts = new Map<string, number>();
+      const hubCounts = new Map<string, number>();
+      const seenCombos = new Set<string>();
+
+      let remaining = [...routes];
+
+      while (selected.length < limit && remaining.length > 0) {
+        const scoredRemaining = remaining.map((r) => {
+          const t1 = cleanTrain(r.leg1?.trainNo);
+          const t2 = cleanTrain(r.leg2?.trainNo);
+          const t1Rep = trainCounts.get(t1) || 0;
+          const t2Rep = trainCounts.get(t2) || 0;
+          const penalty = (t1Rep + t2Rep) * 20;
+          return { route: r, score: (r.score || 0) - penalty };
+        });
+
+        scoredRemaining.sort((a, b) => b.score - a.score);
+        const bestItem = scoredRemaining[0];
+        const r = bestItem.route;
+
+        remaining = remaining.filter((x) => x !== r);
+
+        const t1 = cleanTrain(r.leg1?.trainNo);
+        const t2 = cleanTrain(r.leg2?.trainNo);
+        if (!t1 || !t2) continue;
+
+        const comboKey1 = `${t1}_${t2}`;
+        const comboKey2 = `${t2}_${t1}`;
+        if (seenCombos.has(comboKey1) || seenCombos.has(comboKey2)) {
+          continue;
+        }
+
+        const hub = r.hubStation;
+        const hubCount = hubCounts.get(hub) || 0;
+        if (hubCount >= 4) {
+          continue;
+        }
+
+        selected.push(r);
+        seenCombos.add(comboKey1);
+        seenCombos.add(comboKey2);
+        hubCounts.set(hub, hubCount + 1);
+        trainCounts.set(t1, (trainCounts.get(t1) || 0) + 1);
+        trainCounts.set(t2, (trainCounts.get(t2) || 0) + 1);
+      }
+
+      return selected;
+    };
+
+    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 30);
+
+    // Attempt live enrichment on top candidates within time budget.
+    // We do NOT discard routes that fail enrichment — they remain as fallbacks.
+    // Enrich ALL routes in true parallel — no serial bail-out guard that starves later routes.
+    // Every route starts simultaneously; the whole batch races against a shared deadline.
+    const LIVE_TOP_SPLIT = Math.min(diverseRoutes.length, 20);
+    if (LIVE_TOP_SPLIT > 0) {
+      const enrichDeadlineMs = 8500; // total budget from API start
+      const perRouteTimeoutMs = 6000; // per-route cap so one slow route can't block others
+
+      const enrichRoute = async (route: any) => {
+        const legDate = route.leg1Date || route.leg2Date || date;
+        try {
+          const [leg1Enriched, leg2Enriched] = await Promise.all([
+            withTimeout(
+              enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }),
+              perRouteTimeoutMs,
+              route.leg1
+            ),
+            withTimeout(
+              enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }),
+              perRouteTimeoutMs,
+              route.leg2
+            ),
+          ]);
+          if (leg1Enriched?.trainNo && leg2Enriched?.trainNo) {
+            route.leg1 = leg1Enriched;
+            route.leg2 = leg2Enriched;
+            route._liveEnriched = true;
+          }
+        } catch (e) {
+          console.warn(`[search-split] Enrichment failed`, e);
+        }
+      };
+
+      const timeRemaining = Math.max(2000, enrichDeadlineMs - (Date.now() - apiStartTime));
+      await Promise.race([
+        Promise.all(diverseRoutes.slice(0, LIVE_TOP_SPLIT).map(enrichRoute)),
+        new Promise((resolve) => setTimeout(resolve, timeRemaining))
+      ]);
+    }
+
+    // A leg is definitively rejected when IRCTC explicitly said the class/date is invalid.
+    // These are NOT transient errors — retrying or showing them as "unverified" is pointless.
+    const FIRM_REJECTION_RE =
+      /not available for booking|not bookable|train not on scheduled date|not scheduled|not running|class does not exist|class not available|class not returned|does not exist in this train|cancelled|no quota available/i;
+
+    const isLegDefinitelyRejected = (leg: any) => {
+      if (!leg) return false;
+      const availStatus = leg.availabilityStatus || 'NOT_CHECKED';
+      if (availStatus === 'VERIFIED') return false; // real seat data → definitely NOT rejected
+      const reason = String(leg.lookupReason || leg.availability || leg.availabilityText || '');
+      return FIRM_REJECTION_RE.test(reason);
+    };
+
+    const isNotBookable = (leg: any) => {
+      if (!leg) return false;
+      const reason = String(leg.lookupReason || leg.availability || leg.availabilityText || leg.status || '').toLowerCase();
+      return reason.includes("not bookable") || reason.includes("not available for booking") || reason.includes("train not on scheduled date");
+    };
+
+    const parseFareVal = (fareStrOrNum: any) => {
+      const fareStr = String(fareStrOrNum || '');
+      return Number(fareStr.replace(/[^\d.]/g, '')) || 0;
+    };
+
+    // Filter split routes globally based on Step 3:
+    const finalRoutes = diverseRoutes.filter(route => {
+      // 1. Only show split cards where at least leg 1 has confirmed fare + availability from provider
+      if (!isLegVerifiedAndBookable(route.leg1)) {
+        return false;
+      }
+
+      // 2. "Not bookable on this date" for selected class → remove entire split card
+      if (isNotBookable(route.leg1) || isNotBookable(route.leg2)) {
+        return false;
+      }
+      if (isLegDefinitelyRejected(route.leg1) || isLegDefinitelyRejected(route.leg2)) {
+        return false;
+      }
+
+      // 3. Both legs returning no fare after retry → remove entire split card
+      const f1 = parseFareVal(route.leg1.fare);
+      const f2 = parseFareVal(route.leg2.fare);
+      if (f1 === 0 && f2 === 0) {
+        return false;
+      }
+
+      return true;
+    });
+
+    let filteredSplitRoutes = finalRoutes.slice(0, 15);
 
     const LIVE_TOP_MULTI = Math.min(2, multiSplitRoutes.length);
     if (LIVE_TOP_MULTI > 0) {
-      const multiLivePromises = multiSplitRoutes.slice(0, LIVE_TOP_MULTI).flatMap((route) => {
+      const promises = multiSplitRoutes.slice(0, LIVE_TOP_MULTI).map(async (route, index) => {
         const legs = route.legs || [];
-        return legs.map((leg: any) => enrichWithLiveAvailability(leg, date, classType, { fetchLive: false, liveLookupLimit: 2, debug: false }));
+        try {
+          const enrichedLegs = await Promise.all(
+            legs.map((leg: any) => enrichWithLiveAvailability(leg, date, classType, { fetchLive: true, fetchAllClasses: false, debug: false }))
+          );
+          if (enrichedLegs.every(el => el?.trainNo)) {
+            multiSplitRoutes[index].legs = enrichedLegs;
+          }
+        } catch (e) {
+          console.warn(`[search-split] Multi-leg enrichment failed for index ${index}`, e);
+        }
       });
 
-      const multiLiveResults = await Promise.allSettled(multiLivePromises);
-      for (let i = 0; i < LIVE_TOP_MULTI; i++) {
-        const legs = multiSplitRoutes[i].legs || [];
-        for (let j = 0; j < legs.length; j++) {
-          const result = multiLiveResults[i * legs.length + j];
-          if (result.status === 'fulfilled' && result.value?.trainNo) {
-            legs[j] = result.value;
-          }
-        }
-      }
+      const timeRemainingMulti = Math.max(500, 8800 - (Date.now() - apiStartTime));
+      await Promise.race([
+        Promise.all(promises),
+        new Promise((resolve) => setTimeout(resolve, timeRemainingMulti))
+      ]);
     }
 
-    const routeRecommendation = localRecommendation(directTrains, splitRoutes, multiSplitRoutes, budget);
+    // Same fix: show all multi-leg routes, verified first, fallback last.
+    const verifiedMulti = multiSplitRoutes.filter(route => {
+      const legs = route.legs || [];
+      return legs.length > 0 && legs.every(isLegVerifiedAndBookable);
+    });
+    const unverifiedMulti = multiSplitRoutes.filter(route => {
+      const legs = route.legs || [];
+      return legs.length > 0 && !legs.every(isLegVerifiedAndBookable);
+    });
+    let filteredMultiSplitRoutes = [...verifiedMulti, ...unverifiedMulti].slice(0, 5);
+
+    const routeRecommendation = localRecommendation(directTrains, filteredSplitRoutes, filteredMultiSplitRoutes, budget);
     const meta = buildTrustMeta({
       source: 'fallback',
       provider: 'RailRoute split planner',
@@ -147,12 +294,12 @@ export async function POST(request: Request) {
     });
 
     return apiSuccess({
-      data: { splitRoutes: filteredSplitRoutes, multiSplitRoutes, routeRecommendation },
+      data: { splitRoutes: filteredSplitRoutes, multiSplitRoutes: filteredMultiSplitRoutes, routeRecommendation },
       meta,
       requestId,
       extra: {
         splitRoutes: filteredSplitRoutes,
-        multiSplitRoutes,
+        multiSplitRoutes: filteredMultiSplitRoutes,
         routeRecommendation,
         coverageMode,
         canExpand: filteredSplitRoutes.length >= plannerOptions.maxSplitResults,

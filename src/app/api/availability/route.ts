@@ -8,7 +8,7 @@ import { getVerifiedAvailability } from "@/services/availabilityService";
 export async function POST(request: Request) {
   const requestId = `avail_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   const ip = getClientIp(request);
-  if (isRateLimited(`avail_${ip}`, 20, 60 * 1000)) {
+  if (isRateLimited(`avail_${ip}`, 150, 60 * 1000)) {
     return apiFailure({
       error: "Too many requests. Please try again later.",
       requestId,
@@ -53,9 +53,12 @@ export async function POST(request: Request) {
       date: result.data.date,
       availabilityText,
       status: availabilityText,
+      // IMPORTANT: never use "unavailable" here when we have real data — even an
+      // approximate date match has a real availability text and fare.  Using "unavailable"
+      // causes liveQuoteFromResponse to suppress the data entirely (shows "Not returned").
       source: result.data.exactDate
         ? "date-specific-provider"
-        : (result.data.fare || result.data.availabilityText)
+        : (result.data.availabilityText || result.data.fare)
           ? "approximate"
           : "unavailable",
       reason: result.data.reason,

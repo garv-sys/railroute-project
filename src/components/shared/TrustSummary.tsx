@@ -265,22 +265,36 @@ export function inferLookupStatus(value: unknown): LookupTrustStatus {
 export function lookupStatusLabel(status: LookupTrustStatus | undefined, kind: "availability" | "fare", classCode?: string, reason?: unknown) {
   const code = classCode ? ` for ${classCode}` : "";
   const detail = String(reason || "").trim();
-  if (status === "VERIFIED") return kind === "fare" ? "Provider returned fare for this exact request" : `Provider returned availability${code} for this exact request`;
-  if (status === "NOT_CHECKED") return kind === "fare" ? "Estimated fare shown" : `Tap to check seats${code}`;
-  if (status === "RATE_LIMITED") return kind === "fare" ? "Estimated fare shown" : `Check seats${code}`;
-  if (status === "CACHE_ONLY") return kind === "fare" ? "Estimated fare shown" : `Tap to check seats${code}`;
+  if (status === "VERIFIED") return kind === "fare" ? "Provider returned fare" : `Live availability confirmed${code}`;
+  if (status === "NOT_CHECKED") return kind === "fare" ? "" : "";
+  if (status === "RATE_LIMITED") return kind === "fare" ? "" : "";
+  if (status === "CACHE_ONLY") return kind === "fare" ? "" : "";
   if (detail && !/live data unavailable|live fare unavailable|rate.?limit|too many requests|429|provider did not return/i.test(detail)) return detail;
-  return kind === "fare" ? "Estimated fare shown" : `Tap to check seats${code}`;
+  return kind === "fare" ? "" : "";
+}
+
+export function resolveClassCode(train: any, classCode = "") {
+  const requested = String(classCode || "").toUpperCase().trim();
+  const defaultClass = String(train?.classType || "").toUpperCase().trim();
+  let code = requested && requested !== "ANY" ? requested : defaultClass;
+
+  if (code && train?.classAvailability && !train.classAvailability[code]) {
+    const keys = Object.keys(train.classAvailability);
+    if (keys.length > 0) {
+      code = keys[0];
+    }
+  }
+  return code;
 }
 
 export function trainAvailabilityStatus(train: any, classCode?: string): LookupTrustStatus {
-  const code = String(classCode || train?.classType || "").toUpperCase();
+  const code = resolveClassCode(train, classCode);
   const first = code ? train?.classAvailability?.[code]?.[0] : undefined;
   return first?.availabilityStatus || train?.availabilityStatus || inferLookupStatus(first?.text || train?.availability);
 }
 
 export function trainFareStatus(train: any, classCode?: string): LookupTrustStatus {
-  const code = String(classCode || train?.classType || "").toUpperCase();
+  const code = resolveClassCode(train, classCode);
   const first = code ? train?.classAvailability?.[code]?.[0] : undefined;
   if (first?.fareStatus) return first.fareStatus;
   if (train?.fareStatus) return train.fareStatus;
@@ -342,28 +356,31 @@ export function isUnavailableRailStatus(value: unknown) {
 
 export function ticketDecision(value: unknown) {
   const status = readableRailStatus(value).toUpperCase();
-  if (/CHECK AVAILABILITY|TAP CLASS TO FETCH/.test(status)) {
-    return { label: "Check live availability", tone: "bg-cyan-100 text-cyan-800 dark:bg-cyan-300/12 dark:text-cyan-100" };
+  if (/CHECK AVAILABILITY|TAP CLASS TO FETCH|TAP TO CHECK SEATS/.test(status)) {
+    return { label: "Check availability", tone: "bg-cyan-100 text-cyan-800 dark:bg-cyan-300/12 dark:text-cyan-100" };
   }
-  if (/RATE LIMITED|TOO MANY REQUESTS|429/.test(status)) {
-    return { label: "Live check queued", tone: "bg-amber-100 text-amber-800 dark:bg-amber-300/12 dark:text-amber-100" };
+  if (/RATE LIMITED|TOO MANY REQUESTS|429|CHECK SEATS/.test(status)) {
+    return { label: "Check seats", tone: "bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200" };
   }
-  if (/UNAVAILABLE|NOT RUNNING|NOT BOOKABLE/.test(status)) {
-    return { label: "Provider did not return availability", tone: "bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200" };
+  if (/NOT RUNNING|NOT BOOKABLE/.test(status)) {
+    return { label: "Not running on this date", tone: "bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200" };
+  }
+  if (/UNAVAILABLE/.test(status)) {
+    return { label: "", tone: "" };
   }
   if (/REGRET/.test(status)) {
-    return { label: "Provider returned REGRET", tone: "bg-rose-100 text-rose-800 dark:bg-rose-300/12 dark:text-rose-100" };
+    return { label: "Fully waitlisted", tone: "bg-rose-100 text-rose-800 dark:bg-rose-300/12 dark:text-rose-100" };
   }
   if (/\bAVAILABLE\b|\bAVL\b|CNF|CONFIRM/.test(status)) {
-    return { label: "Provider returned availability", tone: "bg-emerald-100 text-emerald-800 dark:bg-emerald-300/12 dark:text-emerald-100" };
+    return { label: "Seats available", tone: "bg-emerald-100 text-emerald-800 dark:bg-emerald-300/12 dark:text-emerald-100" };
   }
   if (/RAC/.test(status)) {
-    return { label: "RAC, not fully confirmed", tone: "bg-amber-100 text-amber-800 dark:bg-amber-300/12 dark:text-amber-100" };
+    return { label: "RAC — partial confirmation", tone: "bg-amber-100 text-amber-800 dark:bg-amber-300/12 dark:text-amber-100" };
   }
-  if (/WL|WAIT|UNAVAILABLE/.test(status)) {
-    return { label: "Not confirmed yet", tone: "bg-rose-100 text-rose-800 dark:bg-rose-300/12 dark:text-rose-100" };
+  if (/WL|WAIT/.test(status)) {
+    return { label: "Waitlisted", tone: "bg-rose-100 text-rose-800 dark:bg-rose-300/12 dark:text-rose-100" };
   }
-  return { label: "Provider did not return availability", tone: "bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200" };
+  return { label: "", tone: "" };
 }
 
 export function availabilityTone(value: unknown) {
@@ -425,7 +442,7 @@ export function formatFare(value: unknown) {
   }
   const text = String(value || "").trim();
   if (/^~?₹[\d,]+\s*est\./i.test(text)) return text;
-  if (!text || text === "₹--" || text === "0") return "Provider did not return fare";
+  if (!text || text === "₹--" || text === "0") return "";
   if (/unavailable|check live|not return|provider did not|quota|rate limited|not requested|request failed|tap to retry/i.test(text)) return text;
   const amount = Number(text.replace(/[₹,\s]/g, ""));
   if (Number.isFinite(amount) && amount > 0) return `₹${amount.toLocaleString("en-IN")}`;
@@ -475,6 +492,15 @@ export function nearbyTerminalDistanceCopy(actualCode: string, requestedCode: st
   const distance = stationDistanceKm(actual, requested);
   if (!distance) return "";
   return `${stationCompactLabel(actual)} is about ${distance} km from ${stationCompactLabel(requested)}.`;
+}
+
+export function stationCompactLabelWithDistance(actualCode: string, requestedCode: string) {
+  const actual = String(actualCode || "").toUpperCase();
+  const requested = String(requestedCode || "").toUpperCase();
+  if (!actual || !requested || actual === requested) return stationCompactLabel(actual);
+  const distance = stationDistanceKm(actual, requested);
+  if (!distance) return stationCompactLabel(actual);
+  return `${stationCompactLabel(actual)} (${distance}km from ${requested})`;
 }
 
 export function nearbyTerminalDistanceSummary(actualSource: string, requestedSource: string, actualDestination: string, requestedDestination: string) {
@@ -529,12 +555,12 @@ export function liveFareText(train: any) {
 }
 
 export function providerBookingBlockedText(value: unknown) {
-  return /not available for booking|not bookable|train not on scheduled date|not scheduled|not running|class does not exist|class not available|class not returned|does not exist in this train/i.test(String(value || ""));
+  return /not available for booking|not bookable|train not on scheduled date|not scheduled|not running|class does not exist|class not available|class not returned|does not exist in this train|cancelled/i.test(String(value || ""));
 }
 
 
 export function classFareAmount(train: any, classCode: string) {
-  const code = String(classCode || "").toUpperCase();
+  const code = resolveClassCode(train, classCode);
   const row = code ? train?.classAvailability?.[code]?.[0] : undefined;
   const rowFare = fareToNumber(row?.fare);
   if (rowFare > 0) return rowFare;
@@ -543,7 +569,7 @@ export function classFareAmount(train: any, classCode: string) {
 }
 
 export function classFareBreakdown(train: any, classCode: string) {
-  const code = String(classCode || "").toUpperCase();
+  const code = resolveClassCode(train, classCode);
   const row = code ? train?.classAvailability?.[code]?.[0] : undefined;
   if (row?.fareBreakdown && typeof row.fareBreakdown === "object") return row.fareBreakdown;
   if (String(train?.classType || "").toUpperCase() === code && train?.fareBreakdown && typeof train.fareBreakdown === "object") return train.fareBreakdown;
@@ -635,14 +661,15 @@ export function compactFareText(value: unknown) {
   // Never show estimated guesses or "Fare unavailable" text in badges
   if (/^~?₹[\d,]+\s*est\./i.test(text)) return "";
   if (/fare unavailable/i.test(text)) return "";
-  if (/not requested|check fare|tap class/i.test(text)) return "Check Fare";
+  if (/not requested|check fare|tap class/i.test(text)) return "";
+  if (/tap to retry|failed to fetch|fetch failed|provider request failed|request failed|provider did not return|availability unavailable|timed out|request timed out|error|unavailable/i.test(text)) return "";
   return formatFare(value);
 }
 
 export function compactSeatText(train: any) {
   const text = liveSeatText(train);
-  if (/not requested|check availability|tap class|tap to check seats/i.test(text)) return "Tap to check seats";
-  if (/tap to retry|failed to fetch|fetch failed|provider request failed|request failed|provider did not return|availability unavailable/i.test(text)) return "Check seats";
+  if (/not requested|check availability|tap class|tap to check seats/i.test(text)) return "";
+  if (/tap to retry|failed to fetch|fetch failed|provider request failed|request failed|provider did not return|availability unavailable|timed out|request timed out|error|unavailable/i.test(text)) return "";
   return text;
 }
 
@@ -700,19 +727,21 @@ export function primaryClassCode(train: any, fallback = "") {
 }
 
 export function classAvailabilityStatus(train: any, classCode: string) {
-  const first = train?.classAvailability?.[classCode]?.[0];
+  const code = resolveClassCode(train, classCode);
+  const first = train?.classAvailability?.[code]?.[0];
   const status = first?.availabilityText || first?.text || first?.status || "";
   const readable = readableRailStatus(status);
   if (readable && /not bookable|not running|class not available/i.test(readable)) return readable;
   if (first?.availabilityStatus && first.availabilityStatus !== "VERIFIED") {
-    return lookupStatusLabel(first.availabilityStatus, "availability", classCode, first.lookupReason || status);
+    return lookupStatusLabel(first.availabilityStatus, "availability", code, first.lookupReason || status);
   }
   if (readable && !/tap for quota|quota unavailable|check seats/i.test(readable)) return readable;
-  return lookupStatusLabel(first?.availabilityStatus || "PROVIDER_UNAVAILABLE", "availability", classCode, first?.lookupReason);
+  return lookupStatusLabel(first?.availabilityStatus || "PROVIDER_UNAVAILABLE", "availability", code, first?.lookupReason);
 }
 
 export function classFareText(train: any, classCode: string) {
-  const first = train?.classAvailability?.[classCode]?.[0];
+  const code = resolveClassCode(train, classCode);
+  const first = train?.classAvailability?.[code]?.[0];
   const fare = fareToNumber(first?.fare);
   const status = first?.fareStatus || "PROVIDER_UNAVAILABLE";
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
@@ -721,9 +750,8 @@ export function classFareText(train: any, classCode: string) {
 
 
 export function hasVerifiedFareAndSeat(train: any, requestedClass = "") {
-  const requested = String(requestedClass || "").toUpperCase().trim();
-  const classCode = requested && requested !== "ANY" ? requested : primaryClassCode(train);
-  const first = classCode ? train?.classAvailability?.[classCode]?.[0] : undefined;
+  const code = resolveClassCode(train, requestedClass);
+  const first = code ? train?.classAvailability?.[code]?.[0] : undefined;
   const availabilityStatus = first?.availabilityStatus || train?.availabilityStatus;
   const fareStatus = first?.fareStatus || train?.fareStatus;
   const fare = fareToNumber(first?.fare ?? train?.fare);
@@ -744,9 +772,10 @@ export function multiSplitHasVerifiedFareAndSeats(split: any, requestedClass = "
 }
 
 export function classDataSourceLabel(train: any, classCode: string) {
-  const first = train?.classAvailability?.[classCode]?.[0];
+  const code = resolveClassCode(train, classCode);
+  const first = train?.classAvailability?.[code]?.[0];
   if (first?.availabilityStatus === "VERIFIED" || first?.fareStatus === "VERIFIED") return "Provider-backed";
-  if (first?.availabilityStatus === "NOT_CHECKED" || first?.fareStatus === "NOT_CHECKED") return "Not checked yet";
+  if (first?.availabilityStatus === "NOT_CHECKED" || first?.fareStatus === "NOT_CHECKED") return "";
   if (first?.availabilityStatus === "RATE_LIMITED" || first?.fareStatus === "RATE_LIMITED") return "Live check queued";
   if (first?.availabilityStatus === "CACHE_ONLY" || first?.fareStatus === "CACHE_ONLY") return "Cached schedule";
   const updated = String(first?.updatedTime || "").toLowerCase();
@@ -829,14 +858,31 @@ export function liveQuoteFromResponse(response: any, classCode: string, journeyD
   const providerFare = response?.data?.fare ?? response?.fare;
   const providerFareIsExact = response?.data?.fareStatus === "VERIFIED" &&
     (response?.data?.fareSource === "date-specific-provider" || response?.data?.fareExactRequest === true);
-  const fare = providerFare && providerFareIsExact
-    ? fareToNumber(providerFare.totalFare ?? providerFare.Fare ?? providerFare.Amount ?? providerFare)
-    : 0;
+  // Accept fare from approximate date matches too — discarding it causes the strip to show
+  // "Fare unavailable" even when IRCTC returned a valid amount for a nearby date.
+  const fareAmt =
+    providerFare
+      ? fareToNumber(providerFare.totalFare ?? providerFare.Fare ?? providerFare.Amount ?? providerFare)
+      : 0;
+  const fare = providerFareIsExact || (fareAmt > 0 && response?.data?.fareStatus === "VERIFIED") ? fareAmt : 0;
   const providerWarning = response?.warning || response?.extra?.warning || response?.meta?.warning || "";
   const responseAvailabilityStatus = response?.data?.availabilityStatus as LookupTrustStatus | undefined;
   const responseFareStatus = response?.data?.fareStatus as LookupTrustStatus | undefined;
   const responseLookupReason = response?.data?.lookupReason || response?.data?.reason || providerWarning;
   const responseProof = response?.data?.proof;
+
+  // [live-check-debug] log what we got from the API
+  console.log('[live-check-debug] liveQuoteFromResponse', {
+    classCode, journeyDate,
+    success: response?.success,
+    fareStatus: responseFareStatus,
+    fareExactRequest: response?.data?.fareExactRequest,
+    fareAmt: fare,
+    availabilityRows: Array.isArray(response?.data?.availability) ? response.data.availability.length : 0,
+    warning: providerWarning,
+    reason: responseLookupReason,
+  });
+
   if (!response || response.success === false) {
     const message = response?.error || providerWarning || `Provider did not return availability for ${classCode} on the selected train/date/quota`;
     const rateLimited = isProviderDelay(message);
@@ -880,6 +926,8 @@ export function liveQuoteFromResponse(response: any, classCode: string, journeyD
   const providerUnavailable = providerIssueCopy(rowReason, classCode);
   const provider = String(response.provider || "").toLowerCase();
   const rowSource = String(row.source || "").toLowerCase();
+  // "unavailable" means the provider gave no usable data. "approximate" means it gave data
+  // for a nearby date — still real data worth showing, not suppressed as unavailable.
   const unavailable = rowSource === "unavailable" || isUnavailableRailStatus(availability);
   const source = rateLimited
     ? "Live check queued"
@@ -965,11 +1013,25 @@ export function applyLiveQuoteToTrain(train: any, classCode: string, quote?: Liv
   };
 }
 
+// Firm rejections from IRCTC — retrying is pointless, don't show the re-check button
+const FIRM_REJECTION_PATTERN =
+  /not available for booking|not bookable|train not on scheduled date|not scheduled|not running|class does not exist|class not available|class not returned|does not exist in this train|cancelled|no quota available/i;
+
 export function needsLiveQuotaRefresh(train: any, classCode: string) {
   const code = String(classCode || "").toUpperCase();
   const first = train?.classAvailability?.[code]?.[0];
+  if (!first) return true;
   if (first?.availabilityStatus === "NOT_CHECKED" || first?.fareStatus === "NOT_CHECKED") return true;
   if (first?.availabilityStatus === "RATE_LIMITED" || first?.fareStatus === "RATE_LIMITED") return true;
+  if (first?.availabilityStatus === "PROVIDER_UNAVAILABLE" || first?.fareStatus === "PROVIDER_UNAVAILABLE") {
+    // If IRCTC gave a hard "not bookable / class doesn't exist / not running" answer,
+    // retrying will return the same thing — don't offer the button.
+    const reason = String(
+      first?.lookupReason || first?.text || first?.availabilityText || first?.availability || ""
+    );
+    if (FIRM_REJECTION_PATTERN.test(reason)) return false;
+    return true; // transient provider error — retry makes sense
+  }
   const status = classAvailabilityStatus(train, classCode);
   const source = classDataSourceLabel(train, classCode);
   return /availability unavailable|provider did not return|fare unavailable|live fare unavailable|quota unavailable|not returned|not requested|rate limited/i.test(`${status} ${source}`);
@@ -1106,11 +1168,11 @@ export function trainJourneyDate(train: any, fallbackDate: string) {
 }
 
 export function liveSourceStation(train: any) {
-  return String(train?.availabilitySourceStation || train?.source || "").toUpperCase();
+  return String(train?.trainSource || train?.availabilitySourceStation || train?.source || train?.from_stn_code || train?.fromStnCode || "").toUpperCase().trim();
 }
 
 export function liveDestinationStation(train: any) {
-  return String(train?.availabilityDestinationStation || train?.destination || "").toUpperCase();
+  return String(train?.trainDestination || train?.availabilityDestinationStation || train?.destination || train?.to_stn_code || train?.toStnCode || "").toUpperCase().trim();
 }
 
 export function requestedSourceStation(train: any, fallback = "") {
@@ -1195,7 +1257,7 @@ export function dedupeSplitRoutes(splits: any[]) {
 }
 
 export function classCalendarFor(train: any, classType = "3A") {
-  const activeClass = train?.classAvailability?.[classType] ? classType : train?.classType || "3A";
+  const activeClass = resolveClassCode(train, classType);
   const existing = train?.classAvailability?.[activeClass] || [];
   return existing.slice(0, 60);
 }

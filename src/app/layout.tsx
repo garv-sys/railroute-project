@@ -3,7 +3,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://railroute-project.vercel.app"),
+  metadataBase: new URL("https://hehe-phi-eosin.vercel.app"),
   title: {
     default: "RailRoute | Indian Railways Search",
     template: "%s | RailRoute",
@@ -14,12 +14,13 @@ export const metadata: Metadata = {
   openGraph: {
     title: "RailRoute | Indian Railways Search",
     description: "Search trains, split journeys, fares, PNR status, route details and coach layouts with clear source labels.",
-    url: "https://railroute-project.vercel.app",
+    url: "https://hehe-phi-eosin.vercel.app",
+    images: ["/og-image.png"],
     siteName: "RailRoute",
     type: "website",
   },
   twitter: {
-    card: "summary_large_image",
+    card: "summary",
     title: "RailRoute | Indian Railways Search",
     description: "Provider-backed train search, fares, PNR, route details and coach layouts.",
   },

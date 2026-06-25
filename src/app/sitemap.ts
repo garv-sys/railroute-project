@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const siteUrl = "https://railroute-project.vercel.app";
+const siteUrl = "https://hehe-phi-eosin.vercel.app";
 
 const routes = [
   ["", 1],

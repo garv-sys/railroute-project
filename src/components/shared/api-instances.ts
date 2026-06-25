@@ -41,4 +41,4 @@ export class ClientAPIQueue {
   }
 }
 
-export const clientAvailabilityQueue = new ClientAPIQueue(6, 150);
+export const clientAvailabilityQueue = new ClientAPIQueue(8, 150);

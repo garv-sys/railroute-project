@@ -32,7 +32,15 @@ export async function POST(request: Request) {
       query.destination,
       query.date,
       query.classType,
-      { debug: true, fetchLive: false, liveLookupLimit: 0, exactStationOnly: false, providerPairLimit: 20, plannerLegTimeoutMs: 3000 }
+      {
+        debug: true,
+        fetchLive: true,
+        liveLookupLimit: 15,
+        fetchAllClasses: true,
+        exactStationOnly: false,
+        providerPairLimit: 20,
+        plannerLegTimeoutMs: 4000
+      }
     );
 
     const meta = trustMetaForTrainList(trains);

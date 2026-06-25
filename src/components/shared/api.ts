@@ -24,7 +24,7 @@ export async function postJson<T>(url: string, body: unknown): Promise<T> {
 
   const runFetch = () => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
 
     return fetch(url, {
       method: "POST",

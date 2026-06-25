@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef, FormEvent } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback, FormEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -89,7 +89,7 @@ import {
   stationCompactLabel,
 } from "../shared/utils";
 import { LoadingBlock } from "../shared/LoadingBlock";
-import { TrustSummary, QuotaTimingNotice, RunningDaysStrip, primaryClassCode, classAvailabilityStatus, compactSeatText, classAvailabilityText, returnedClassesForTrain, liveFareText, compactFareText, fareTone, availabilityTone, readableRailStatus, fareToNumber, durationToMinutes, splitTotalDuration, splitLayoverMinutes, classFareAmount, trainFareAmount, timeToMinutes, multiSplitLayoverMinutes, actualLegSourceStation, actualLegDestinationStation, trainNumberName, isSeatAvailable, splitHasVerifiedFareAndSeats, formatFare, formatDurationLong, multiSplitHasVerifiedFareAndSeats, classFareText, classDataSourceLabel, debugModeEnabled, providerMarkedSelectedClassUnavailable, hasVerifiedFareAndSeat, dedupeSplitRoutes, isLongJourneyStationPair, splitRouteStableKey, splitAutoLiveRouteCountForJourney, liveSourceStation, liveDestinationStation, trainJourneyDate, needsLiveQuotaRefresh, type LiveClassQuote, applyLiveQuoteToTrain, liveQuoteFromResponse, isProviderDelay, providerDelayCopy, providerIssueCopy, lookupStatusLabel, fullStationLabelFromCode, SearchResultSummary, ResultSectionHeader, displayClassesForTrain, classCalendarFor, legUsesAlternateTerminal, nearbyTerminalDistanceSummary, requestedSourceStation, requestedDestinationStation, isUnavailableRailStatus, normalizedClassList, liveDataUnavailableWarning, ticketDecision, compactDebugJson, ExpectedPlatformPair, confirmationChanceLabel, confirmationChanceTone, PlatformPairSummary, platformDisplay, FareBreakdownPanel, availabilityCardTone, legDataTrustCopy, estimatedFareAmount, selectedClassCanBeChecked, providerBookingBlockedText } from "../shared/TrustSummary";
+import { TrustSummary, QuotaTimingNotice, RunningDaysStrip, primaryClassCode, resolveClassCode, classAvailabilityStatus, compactSeatText, classAvailabilityText, returnedClassesForTrain, liveFareText, compactFareText, fareTone, availabilityTone, readableRailStatus, fareToNumber, durationToMinutes, splitTotalDuration, splitLayoverMinutes, classFareAmount, trainFareAmount, timeToMinutes, multiSplitLayoverMinutes, actualLegSourceStation, actualLegDestinationStation, trainNumberName, isSeatAvailable, splitHasVerifiedFareAndSeats, formatFare, formatDurationLong, multiSplitHasVerifiedFareAndSeats, classFareText, classDataSourceLabel, debugModeEnabled, providerMarkedSelectedClassUnavailable, hasVerifiedFareAndSeat, dedupeSplitRoutes, isLongJourneyStationPair, splitRouteStableKey, splitAutoLiveRouteCountForJourney, liveSourceStation, liveDestinationStation, trainJourneyDate, needsLiveQuotaRefresh, type LiveClassQuote, applyLiveQuoteToTrain, liveQuoteFromResponse, isProviderDelay, providerDelayCopy, providerIssueCopy, lookupStatusLabel, fullStationLabelFromCode, SearchResultSummary, ResultSectionHeader, displayClassesForTrain, classCalendarFor, legUsesAlternateTerminal, nearbyTerminalDistanceSummary, requestedSourceStation, requestedDestinationStation, isUnavailableRailStatus, normalizedClassList, liveDataUnavailableWarning, ticketDecision, compactDebugJson, ExpectedPlatformPair, confirmationChanceLabel, confirmationChanceTone, PlatformPairSummary, platformDisplay, FareBreakdownPanel, availabilityCardTone, legDataTrustCopy, estimatedFareAmount, selectedClassCanBeChecked, providerBookingBlockedText, stationCompactLabelWithDistance } from "../shared/TrustSummary";
 import { StationAutocomplete, RelatedStationChips, QuickSearch, resolveStationInput, splitBestRankScore, splitAvailabilityScore, multiSplitBestRankScore, DateQuickField, NearbyDateSuggestions } from "../shared/StationAutocomplete";
 import { ProductShell } from "../layout/ProductShell";
 import { ToolHeader } from "../layout/ToolHeader";
@@ -103,6 +103,7 @@ export function TrainResultsWorkspace() {
   const liveHydrationChain = useRef(Promise.resolve());
   const splitAutoCheckedRouteCount = useRef(0);
   const lastAutoSearchKey = useRef("");
+  const queuedTargets = useRef<Set<string>>(new Set());
   const [searchKey, setSearchKey] = useState("");
   const [source, setSource] = useState(DEFAULT_SOURCE_CODE);
   const [destination, setDestination] = useState(DEFAULT_DESTINATION_CODE);
@@ -215,6 +216,31 @@ export function TrainResultsWorkspace() {
     const fareLimit = Number(maxFare) || Infinity;
     const durationLimit = maxDuration ? Number(maxDuration) * 60 : Infinity;
     return dedupeSplitRoutes(state.splits).filter((split) => {
+      // Step 3 Filters:
+      // 1. Only show split cards where at least leg 1 has confirmed fare + availability from provider
+      if (!hasVerifiedFareAndSeat(split.leg1, selectedSortClass || "")) {
+        return false;
+      }
+
+      // 2. "Not bookable on this date" for selected class on either leg -> remove entire split card
+      const isNotBookableLeg = (leg: any) => {
+        const code = resolveClassCode(leg, selectedSortClass || "");
+        const first = code ? leg?.classAvailability?.[code]?.[0] : undefined;
+        const avail = String(first?.text || first?.availabilityText || leg?.availability || "").toLowerCase();
+        const reason = String(first?.lookupReason || leg?.lookupReason || "").toLowerCase();
+        const combined = avail + " " + reason;
+        return /not bookable|not available for booking|train not on scheduled date|cancelled/i.test(combined);
+      };
+      if (isNotBookableLeg(split.leg1) || isNotBookableLeg(split.leg2)) {
+        return false;
+      }
+
+      // 3. Both legs returning no fare after retry -> remove entire split card
+      const f1 = selectedSortClass ? classFareAmount(split.leg1, selectedSortClass) : trainFareAmount(split.leg1);
+      const f2 = selectedSortClass ? classFareAmount(split.leg2, selectedSortClass) : trainFareAmount(split.leg2);
+      if (!f1 && !f2) {
+        return false;
+      }
       // Search query filter for splits
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
@@ -226,21 +252,15 @@ export function TrainResultsWorkspace() {
         const matchL2 = l2Name.includes(query) || l2No.includes(query);
         if (!matchL1 && !matchL2) return false;
       }
-      // Filter out splits where either leg is explicitly not bookable for the station pair
-      const isLegUnbookable = (leg: any) => {
-        const avail = String(leg?.availability || leg?.classAvailability?.[selectedSortClass || primaryClassCode(leg)]?.[0]?.availabilityText || leg?.classAvailability?.[selectedSortClass || primaryClassCode(leg)]?.[0]?.text || "");
-        const reason = String(leg?.lookupReason || leg?.classAvailability?.[selectedSortClass || primaryClassCode(leg)]?.[0]?.lookupReason || "");
-        return providerBookingBlockedText(avail) || providerBookingBlockedText(reason);
-      };
-      if (isLegUnbookable(split.leg1) || isLegUnbookable(split.leg2)) return false;
-      // Only show splits where BOTH legs have confirmed fare + seat availability
-      if (!splitHasVerifiedFareAndSeats(split, selectedSortClass)) return false;
-      // Confirmed seats only filter
+      // Confirmed seats only filter (only apply if we actually have verified data)
       if (confirmedOnly) {
         const isConfirmed = (leg: any) => {
+          const code = resolveClassCode(leg, selectedSortClass || "");
           const avail = String(leg?.availability || "").toUpperCase();
-          const classAvail = selectedSortClass ? String(leg?.classAvailability?.[selectedSortClass]?.[0]?.text || "").toUpperCase() : avail;
+          const classAvail = code ? String(leg?.classAvailability?.[code]?.[0]?.text || "").toUpperCase() : avail;
           const status = classAvail || avail;
+          // If not yet checked, keep it (don't filter out unverified routes for confirmedOnly)
+          if (!status || /NOT_CHECKED|TAP TO CHECK|CHECK SEATS/i.test(status)) return true;
           return /\bAVAILABLE\b|\bAVL\b|\bCNF\b|\bCONFIRM/.test(status) && !/WL|RAC|WAITLIST/.test(status);
         };
         if (!isConfirmed(split.leg1) || !isConfirmed(split.leg2)) return false;
@@ -253,6 +273,11 @@ export function TrainResultsWorkspace() {
       if (duration && duration > durationLimit) return false;
       return true;
     }).sort((a, b) => {
+      // Verified routes (have real IRCTC availability data) always rank above unverified
+      const aVerified = splitHasVerifiedFareAndSeats(a, selectedSortClass || "") ? 1 : 0;
+      const bVerified = splitHasVerifiedFareAndSeats(b, selectedSortClass || "") ? 1 : 0;
+      if (bVerified !== aVerified) return bVerified - aVerified;
+
       const getFareVal = (s: any) => {
         const verifiedFare = fareToNumber(s.totalFare || s.fare);
         if (verifiedFare > 0) return verifiedFare;
@@ -280,76 +305,105 @@ export function TrainResultsWorkspace() {
   const visibleTrains = useMemo(() => {
     const verified = filteredTrains;
     const verifiedKeys = new Set(verified.map((t) => `${t.trainNo}-${t.source}-${t.destination}`));
-    let unverified = state.trains.filter(
-      (t) => !verifiedKeys.has(`${t.trainNo}-${t.source}-${t.destination}`)
-    );
+    let unverified = state.trains.filter((t) => {
+      if (verifiedKeys.has(`${t.trainNo}-${t.source}-${t.destination}`)) {
+        return false;
+      }
+      
+      // Apply filters to unverified trains to ensure they match search criteria
+      // 1. Check if verified-unbookable
+      const requested = String(selectedSortClass || "").toUpperCase().trim();
+      const classCode = requested && requested !== "ANY" ? requested : primaryClassCode(t);
+      const first = classCode ? t?.classAvailability?.[classCode]?.[0] : undefined;
+      const availabilityStatus = first?.availabilityStatus || t?.availabilityStatus;
+      const fareStatus = first?.fareStatus || t?.fareStatus;
+      
+      const isChecked = availabilityStatus === "VERIFIED" && fareStatus === "VERIFIED";
+      
+      if (isChecked) {
+        if (!hasVerifiedFareAndSeat(t, selectedSortClass)) {
+          return false;
+        }
+      } else {
+        const rawAvail = String(t?.availability || "").toUpperCase();
+        const rawClassAvail = classCode ? String(t?.classAvailability?.[classCode]?.[0]?.text || "").toUpperCase() : rawAvail;
+        const rawStatus = rawClassAvail || rawAvail;
+        if (providerBookingBlockedText(rawStatus)) {
+          return false;
+        }
+      }
+      
+      // 2. Confirmed Only filter
+      if (confirmedOnly) {
+        const avail = String(t?.availability || "").toUpperCase();
+        const classAvail = classCode ? String(t?.classAvailability?.[classCode]?.[0]?.text || "").toUpperCase() : avail;
+        const status = classAvail || avail;
+        if (status && (/WL|RAC|WAITLIST/.test(status) || !/\bAVAILABLE\b|\bAVL\b|\bCNF\b|\bCONFIRM/.test(status)) && !/NOT_CHECKED|TAP TO CHECK|CHECK SEATS/i.test(status)) {
+          return false;
+        }
+      }
+      
+      // 3. Fare Limit filter
+      const fareLimit = Number(maxFare) || Infinity;
+      const fare = classCode ? classFareAmount(t, classCode) : trainFareAmount(t);
+      if (fare && fare > fareLimit) return false;
+      
+      // 4. Duration Limit filter
+      const durationLimit = maxDuration ? Number(maxDuration) * 60 : Infinity;
+      const duration = durationToMinutes(t.duration);
+      if (duration && duration > durationLimit) return false;
+      
+      return true;
+    });
+
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      unverified = unverified.filter((train) => {
-        const trainName = String(train.trainName || "").toLowerCase();
-        const trainNo = String(train.trainNo || "").toLowerCase();
-        return trainName.includes(query) || trainNo.includes(query);
-      });
+      const q = searchQuery.toLowerCase().trim();
+      unverified = unverified.filter((train) =>
+        String(train.trainName || "").toLowerCase().includes(q) || String(train.trainNo || "").toLowerCase().includes(q)
+      );
     }
     const sortedUnverified = [...unverified].sort((a, b) => {
       const fareA = selectedSortClass ? classFareAmount(a, selectedSortClass) : trainFareAmount(a);
       const fareB = selectedSortClass ? classFareAmount(b, selectedSortClass) : trainFareAmount(b);
       if (sortBy === "cheapest") return (fareA || Infinity) - (fareB || Infinity);
-      if (sortBy === "highestFare") return (fareB || -Infinity) - (fareA || -Infinity);
       if (sortBy === "fastest") return durationToMinutes(a.duration) - durationToMinutes(b.duration);
       return durationToMinutes(a.duration) - durationToMinutes(b.duration);
     });
     return [...verified, ...sortedUnverified];
-  }, [filteredTrains, state.trains, sortBy, selectedSortClass, searchQuery]);
+  }, [filteredTrains, state.trains, sortBy, selectedSortClass, searchQuery, confirmedOnly, maxFare, maxDuration]);
 
   const visibleSplitRoutes = useMemo(() => {
-    const verified = filteredSplits;
-    const verifiedKeys = new Set(verified.map(splitRouteStableKey));
-    let unverified = dedupeSplitRoutes(state.splits).filter(
-      (split) => !verifiedKeys.has(splitRouteStableKey(split))
-    );
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      unverified = unverified.filter((split) => {
-        const l1Name = String(split.leg1?.trainName || "").toLowerCase();
-        const l1No = String(split.leg1?.trainNo || "").toLowerCase();
-        const l2Name = String(split.leg2?.trainName || "").toLowerCase();
-        const l2No = String(split.leg2?.trainNo || "").toLowerCase();
-        return l1Name.includes(query) || l1No.includes(query) || l2Name.includes(query) || l2No.includes(query);
-      });
-    }
-    const sortedUnverified = [...unverified].sort((a, b) => {
-      if (sortBy === "lowestLayover") return splitLayoverMinutes(a) - splitLayoverMinutes(b);
-      if (sortBy === "fastest") return (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
-      if (sortBy === "cheapest") {
-        const getFareVal = (s: any) => {
-          const verifiedFare = fareToNumber(s.totalFare || s.fare);
-          if (verifiedFare > 0) return verifiedFare;
-          const leg1Class = selectedSortClass || primaryClassCode(s.leg1);
-          const leg2Class = selectedSortClass || primaryClassCode(s.leg2);
-          return estimatedFareAmount(s.leg1, leg1Class) + estimatedFareAmount(s.leg2, leg2Class) || Infinity;
-        };
-        return getFareVal(a) - getFareVal(b);
-      }
-      return (Number(b?.score || 0) - Number(a?.score || 0)) ||
-        (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
-    });
-
-    return [...verified, ...sortedUnverified].slice(0, 15);
-  }, [filteredSplits, state.splits, sortBy, selectedSortClass, searchQuery]);
+    // Match backend limit of 15 so all returned results are shown
+    return filteredSplits.slice(0, 15);
+  }, [filteredSplits]);
 
   const filteredMultiSplits = useMemo(() => {
     const fareLimit = Number(maxFare) || Infinity;
     const durationLimit = maxDuration ? Number(maxDuration) * 60 : Infinity;
     return state.multiSplits.filter((split) => {
-      // Filter out multi-splits where any leg is explicitly unbookable
       const legs: any[] = split.legs || [];
+      if (legs.length === 0) return false;
+
+      // Filter out multi-splits where any leg is explicitly unbookable
       const isLegUnbookable = (leg: any) => {
         const avail = String(leg?.availability || leg?.classAvailability?.[primaryClassCode(leg)]?.[0]?.availabilityText || leg?.classAvailability?.[primaryClassCode(leg)]?.[0]?.text || "");
         const reason = String(leg?.lookupReason || leg?.classAvailability?.[primaryClassCode(leg)]?.[0]?.lookupReason || "");
         return providerBookingBlockedText(avail) || providerBookingBlockedText(reason);
       };
       if (legs.some(isLegUnbookable)) return false;
+
+      // Confirmed Only filter for multi-splits
+      if (confirmedOnly) {
+        const isConfirmed = (leg: any) => {
+          const avail = String(leg?.availability || "").toUpperCase();
+          const classAvail = selectedSortClass ? String(leg?.classAvailability?.[selectedSortClass]?.[0]?.text || "").toUpperCase() : avail;
+          const status = classAvail || avail;
+          if (!status || /NOT_CHECKED|TAP TO CHECK|CHECK SEATS/i.test(status)) return true; // keep unchecked
+          return /\bAVAILABLE\b|\bAVL\b|\bCNF\b|\bCONFIRM/.test(status) && !/WL|RAC|WAITLIST/.test(status);
+        };
+        if (legs.some((leg) => !isConfirmed(leg))) return false;
+      }
+
       const getMultiFare = (s: any) => {
         const verifiedFare = fareToNumber(s.totalFare);
         if (verifiedFare > 0) return verifiedFare;
@@ -364,6 +418,11 @@ export function TrainResultsWorkspace() {
       if (duration && duration > durationLimit) return false;
       return true;
     }).sort((a, b) => {
+      // Verified routes rank first
+      const aVerified = multiSplitHasVerifiedFareAndSeats(a, selectedSortClass || "") ? 1 : 0;
+      const bVerified = multiSplitHasVerifiedFareAndSeats(b, selectedSortClass || "") ? 1 : 0;
+      if (bVerified !== aVerified) return bVerified - aVerified;
+
       const getMultiFare = (s: any) => {
         const verifiedFare = fareToNumber(s.totalFare);
         if (verifiedFare > 0) return verifiedFare;
@@ -386,7 +445,7 @@ export function TrainResultsWorkspace() {
       return multiSplitBestRankScore(b, selectedSortClass) - multiSplitBestRankScore(a, selectedSortClass) ||
         (b.score || 0) - (a.score || 0);
     });
-  }, [maxDuration, maxFare, selectedSortClass, sortBy, state.multiSplits]);
+  }, [maxDuration, maxFare, selectedSortClass, sortBy, state.multiSplits, confirmedOnly]);
 
   const hydrationPending = liveHydration.running || (liveHydration.total > 0 && liveHydration.done < liveHydration.total);
   const waitingForVerifiedDirect = !state.loading && state.trains.length > 0 && filteredTrains.length === 0 && hydrationPending;
@@ -541,6 +600,7 @@ export function TrainResultsWorkspace() {
     splitAutoCheckedRouteCount.current = 0;
     setResultMode("all");
     setLiveHydration(emptyLiveHydration);
+    queuedTargets.current.clear();
     if ((!override || override.pushUrl) && typeof window !== "undefined") {
       try {
         const stored = localStorage.getItem("railroute_recent_searches");
@@ -594,7 +654,8 @@ export function TrainResultsWorkspace() {
             requestId,
             hydrationId,
             "direct train rows",
-            AUTO_LIVE_DIRECT_LIMIT
+            AUTO_LIVE_DIRECT_LIMIT,
+            true // fetchAllClasses
           );
           return trains;
         })
@@ -632,18 +693,10 @@ export function TrainResultsWorkspace() {
             splits: splitRoutes,
             multiSplits: multiSplitRoutes,
           }));
-          // Queue live hydration for top 12 split routes (prevent rate limiting)
-          const liveLimit = splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination);
+          // split auto hydration is handled on mount by ClassRateStrip in SplitJourneyCard
+          const liveLimit = Math.max(15, splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination));
           const priorityRoutes = splitRoutes.slice(0, liveLimit);
           splitAutoCheckedRouteCount.current = priorityRoutes.length;
-          queueLiveHydration(
-            priorityRoutes.flatMap((route: any) => [route.leg1, route.leg2].filter(Boolean)),
-            { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
-            requestId,
-            hydrationId,
-            `top ${priorityRoutes.length} split routes live`,
-            Number.POSITIVE_INFINITY
-          );
           return { splitRoutes, multiSplitRoutes };
         })
         .catch(() => {
@@ -700,7 +753,8 @@ export function TrainResultsWorkspace() {
         requestId,
         hydrationId,
         "merged direct train rows",
-        AUTO_LIVE_DIRECT_LIMIT
+        AUTO_LIVE_DIRECT_LIMIT,
+        true // fetchAllClasses
       );
 
       if (forwardSplits.status === 'fulfilled' || reverseSplits.status === 'fulfilled') {
@@ -744,18 +798,10 @@ export function TrainResultsWorkspace() {
           multiSplits: newMultiSplits,
         }));
 
-        // Queue live hydration for top 12 merged split routes
-        const mergedLiveLimit = splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination);
+        // split auto hydration is handled on mount by ClassRateStrip in SplitJourneyCard
+        const mergedLiveLimit = Math.max(15, splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination));
         const priorityMergedRoutes = newSplits.slice(0, mergedLiveLimit);
         splitAutoCheckedRouteCount.current = priorityMergedRoutes.length;
-        queueLiveHydration(
-          priorityMergedRoutes.flatMap((route: any) => [route.leg1, route.leg2].filter(Boolean)),
-          { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
-          requestId,
-          hydrationId,
-          `top ${priorityMergedRoutes.length} merged split routes live`,
-          Number.POSITIVE_INFINITY
-        );
       }
 
       if (requestId === searchRequestId.current && directCountForRequest === 0 && splitCountForRequest > 0) {
@@ -778,14 +824,27 @@ export function TrainResultsWorkspace() {
 	      (!leftDate || !rightDate || leftDate === rightDate);
 	  }
 
-  function requestedLiveClasses(train: any, requestedClass: string) {
+  function requestedLiveClasses(train: any, requestedClass: string, fetchAllClasses = false) {
     const selected = String(requestedClass || "").toUpperCase();
-    if (selected && selected !== "ANY") return [selected];
-    const fallbackClass = selected && selected !== "ANY" ? selected : primaryClassCode(train);
-    return [fallbackClass].filter(Boolean);
+    if (!fetchAllClasses) {
+      if (selected && selected !== "ANY") return [selected];
+      const fallbackClass = selected && selected !== "ANY" ? selected : primaryClassCode(train);
+      return [fallbackClass].filter(Boolean);
+    }
+    const allCleanClasses = displayClassesForTrain(train);
+    const classes = new Set<string>();
+    if (selected && selected !== "ANY") {
+      classes.add(selected);
+    }
+    allCleanClasses.forEach(c => classes.add(c));
+    if (classes.size === 0) {
+      const fallback = primaryClassCode(train);
+      if (fallback) classes.add(fallback);
+    }
+    return Array.from(classes);
   }
 
-	  function uniqueLiveTargets(trains: any[], requestedClass: string, fallbackDate: string) {
+	  function uniqueLiveTargets(trains: any[], requestedClass: string, fallbackDate: string, fetchAllClasses = false) {
 	    const seen = new Set<string>();
 	    return trains.flatMap((train) => {
 	      const trainNo = String(train?.trainNo || "");
@@ -793,11 +852,12 @@ export function TrainResultsWorkspace() {
 	      const destinationCode = liveDestinationStation(train);
 	      const journeyDate = trainJourneyDate(train, fallbackDate);
 	      if (!trainNo || !sourceCode || !destinationCode) return [];
-	      return requestedLiveClasses(train, requestedClass).flatMap((classCode) => {
+	      return requestedLiveClasses(train, requestedClass, fetchAllClasses).flatMap((classCode) => {
 	        if (!classCode || !needsLiveQuotaRefresh(train, classCode)) return [];
 	        const key = `${trainNo}_${sourceCode}_${destinationCode}_${journeyDate}_${classCode}`;
-	        if (seen.has(key)) return [];
+	        if (seen.has(key) || queuedTargets.current.has(key)) return [];
 	        seen.add(key);
+	        queuedTargets.current.add(key);
 	        return [{ train, classCode, key, journeyDate }];
 	      });
 	    });
@@ -844,9 +904,10 @@ export function TrainResultsWorkspace() {
     requestId: number,
     hydrationId: number,
     label: string,
-    autoLimit = Number.POSITIVE_INFINITY
+    autoLimit = Number.POSITIVE_INFINITY,
+    fetchAllClasses = false
   ) {
-	    const allTargets = uniqueLiveTargets(trains.filter(Boolean), payload.classType, payload.date);
+	    const allTargets = uniqueLiveTargets(trains.filter(Boolean), payload.classType, payload.date, fetchAllClasses);
     const limit = Number.isFinite(autoLimit) ? Math.max(0, autoLimit) : allTargets.length;
 	    const targets = limit >= allTargets.length ? allTargets : allTargets.slice(0, limit);
 	    const deferred = Math.max(0, allTargets.length - targets.length);
@@ -869,72 +930,119 @@ export function TrainResultsWorkspace() {
           deferred: current.deferred,
         }));
 
-        for (const target of targets) {
-          if (requestId !== searchRequestId.current || hydrationId !== liveHydrationGeneration.current) return;
-          setLiveHydration((current) => ({ ...current, current: `${target.train.trainNo} ${target.classCode}` }));
+        const concurrencyLimit = 5;
+        let activeCount = 0;
+        let currentIndex = 0;
+        // Hard per-request timeout: 22s. This guarantees that even if postJson or the
+        // clientAvailabilityQueue hangs forever (never resolves/rejects), the slot is
+        // freed and progress advances. The queue can NEVER stall permanently.
+        const FETCH_HARD_TIMEOUT_MS = 22000;
 
-          let quote: LiveClassQuote;
-          let rateLimited = false;
-          const fetchQuoteForClass = async (classCode: string) => {
-            const targetDate = target.journeyDate || trainJourneyDate(target.train, payload.date);
-            const availabilityPayload = {
-              trainNo: target.train.trainNo,
-              source: liveSourceStation(target.train),
-              destination: liveDestinationStation(target.train),
-              date: targetDate,
-              classType: classCode,
-              quota: payload.quota || "GN",
-              debug: debugModeEnabled(),
-            };
-            const response = await postJson<any>("/api/availability", availabilityPayload);
-            const nextQuote = liveQuoteFromResponse(response, classCode, targetDate);
-            const nextRateLimited = isProviderDelay(`${nextQuote.availability} ${nextQuote.warning || ""} ${nextQuote.error || ""}`);
-            return { quote: nextQuote, rateLimited: nextRateLimited };
-          };
-          try {
-            const result = await fetchQuoteForClass(target.classCode);
-            quote = result.quote;
-            rateLimited = result.rateLimited;
-            if (rateLimited) {
-              const rateLimitedCopy = providerDelayCopy(target.classCode);
-              quote = {
-                ...quote,
-                availability: rateLimitedCopy,
-                source: "Live check queued",
-                updatedTime: rateLimitedCopy,
-                availabilityStatus: "RATE_LIMITED",
-                fareStatus: quote.fare > 0 ? "VERIFIED" : "RATE_LIMITED",
-                lookupReason: rateLimitedCopy,
-                error: rateLimitedCopy,
-              };
+        await new Promise<void>((resolve) => {
+          const nextTarget = () => {
+            if (requestId !== searchRequestId.current || hydrationId !== liveHydrationGeneration.current) {
+              resolve();
+              return;
             }
-	          } catch (error) {
-	            const message = error instanceof Error ? error.message : "Provider request failed";
-	            rateLimited = isProviderDelay(message);
-	            const lookupStatus: LookupTrustStatus = rateLimited ? "RATE_LIMITED" : "PROVIDER_UNAVAILABLE";
-              const cleanMessage = providerIssueCopy(message, target.classCode);
-	            quote = {
-              availability: lookupStatusLabel(lookupStatus, "availability", target.classCode, cleanMessage),
-              fare: 0,
-              source: rateLimited ? "Live check queued" : "Provider unavailable",
-              updatedTime: cleanMessage,
-              availabilityStatus: lookupStatus,
-              fareStatus: lookupStatus,
-              lookupReason: cleanMessage,
-	              error: cleanMessage,
-	            };
-	          }
+            if (currentIndex >= targets.length && activeCount === 0) {
+              resolve();
+              return;
+            }
+            while (activeCount < concurrencyLimit && currentIndex < targets.length) {
+              const target = targets[currentIndex++];
+              activeCount++;
 
-	          if (requestId !== searchRequestId.current || hydrationId !== liveHydrationGeneration.current) return;
-	          applyHydratedQuote(target.train, target.classCode, quote);
-	          setLiveHydration((current) => ({
-	            ...current,
-	            done: Math.min(current.total, current.done + 1),
-	            rateLimited: current.rateLimited + (rateLimited ? 1 : 0),
-	          }));
+              (async () => {
+                let quote: LiveClassQuote | null = null;
+                let rateLimited = false;
 
-            await new Promise((resolve) => setTimeout(resolve, 150));
-        }
+                try {
+                  // Race the actual fetch against a hard timeout — whichever settles first wins.
+                  const fetchResult = await Promise.race<{ quote: LiveClassQuote; rateLimited: boolean } | "TIMEOUT">([
+                    (async () => {
+                      const targetDate = target.journeyDate || trainJourneyDate(target.train, payload.date);
+                      const response = await postJson<any>("/api/availability", {
+                        trainNo: target.train.trainNo,
+                        source: liveSourceStation(target.train),
+                        destination: liveDestinationStation(target.train),
+                        date: targetDate,
+                        classType: target.classCode,
+                        quota: payload.quota || "GN",
+                        debug: debugModeEnabled(),
+                      });
+                      const nextQuote = liveQuoteFromResponse(response, target.classCode, targetDate);
+                      const nextRateLimited = isProviderDelay(`${nextQuote.availability} ${nextQuote.warning || ""} ${nextQuote.error || ""}`);
+                      return { quote: nextQuote, rateLimited: nextRateLimited };
+                    })(),
+                    new Promise<"TIMEOUT">((r) => setTimeout(() => r("TIMEOUT"), FETCH_HARD_TIMEOUT_MS)),
+                  ]);
+
+                  if (fetchResult === "TIMEOUT") {
+                    console.error("Hydration request timed out", target);
+                    const cleanMessage = providerIssueCopy("Request timed out", target.classCode);
+                    quote = {
+                      availability: lookupStatusLabel("PROVIDER_UNAVAILABLE", "availability", target.classCode, cleanMessage),
+                      fare: 0,
+                      source: "Timed out",
+                      updatedTime: cleanMessage,
+                      availabilityStatus: "PROVIDER_UNAVAILABLE",
+                      fareStatus: "PROVIDER_UNAVAILABLE",
+                      lookupReason: cleanMessage,
+                      error: cleanMessage,
+                    };
+                  } else {
+                    rateLimited = fetchResult.rateLimited;
+                    quote = fetchResult.quote;
+                    if (rateLimited) {
+                      const rateLimitedCopy = providerDelayCopy(target.classCode);
+                      quote = {
+                        ...quote,
+                        availability: rateLimitedCopy,
+                        source: "Live check queued",
+                        updatedTime: rateLimitedCopy,
+                        availabilityStatus: "RATE_LIMITED",
+                        fareStatus: quote.fare > 0 ? "VERIFIED" : "RATE_LIMITED",
+                        lookupReason: rateLimitedCopy,
+                        error: rateLimitedCopy,
+                      };
+                    }
+                  }
+                } catch (error) {
+                  console.error("Hydration request failed", error);
+                  const message = error instanceof Error ? error.message : "Provider request failed";
+                  rateLimited = isProviderDelay(message);
+                  const lookupStatus: LookupTrustStatus = rateLimited ? "RATE_LIMITED" : "PROVIDER_UNAVAILABLE";
+                  const cleanMessage = providerIssueCopy(message, target.classCode);
+                  quote = {
+                    availability: lookupStatusLabel(lookupStatus, "availability", target.classCode, cleanMessage),
+                    fare: 0,
+                    source: rateLimited ? "Live check queued" : "Provider unavailable",
+                    updatedTime: cleanMessage,
+                    availabilityStatus: lookupStatus,
+                    fareStatus: lookupStatus,
+                    lookupReason: cleanMessage,
+                    error: cleanMessage,
+                  };
+                } finally {
+                  // CRITICAL: always runs — success, error, or timeout.
+                  // Progress MUST increment on every path so the queue never stalls.
+                  if (requestId === searchRequestId.current && hydrationId === liveHydrationGeneration.current) {
+                    if (quote) applyHydratedQuote(target.train, target.classCode, quote);
+                    setLiveHydration((current) => ({
+                      ...current,
+                      current: `${target.train.trainNo} ${target.classCode}`,
+                      done: Math.min(current.total, current.done + 1),
+                      rateLimited: current.rateLimited + (rateLimited ? 1 : 0),
+                    }));
+                  }
+                  activeCount--;
+                  nextTarget();
+                }
+              })();
+            }
+          };
+          nextTarget();
+        });
 
         if (requestId === searchRequestId.current && hydrationId === liveHydrationGeneration.current) {
           setLiveHydration((current) => {
@@ -1267,33 +1375,56 @@ export function TrainResultsWorkspace() {
 
           {/* Emergency travel panel removed per request */}
 	      <div className="mt-6 space-y-4">
-        {(resultMode === "all" || resultMode === "direct") && (
+        {(resultMode === "all" || resultMode === "direct") && (() => {
+          const validDirectTrains = visibleTrains.filter(t => hasVerifiedFareAndSeat(t, selectedSortClass || ""));
+          return (
           <>
             <ResultSectionHeader title="Direct Trains" detail="Single-train journeys returned by the provider for the selected station pair/date." />
             {state.loading && state.trains.length === 0 ? (
               <LoadingBlock label="Loading direct trains..." />
             ) : visibleTrains.length > 0 ? (
               <>
-                <div className="mb-4 text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
-                  {visibleTrains.length} {visibleTrains.length === 1 ? "train" : "trains"} found
-                </div>
-                {visibleTrains.length > 0 && shouldShowBestDirectPanel(source, destination, visibleTrains[0]) && (
-                  <BestDirectOptionPanel train={visibleTrains[0]} />
+                {liveHydration.running && (
+                  <div className="mb-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/6">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+                    <span className="text-sm font-black text-slate-600 dark:text-slate-300">
+                      Checking live seats & fares — {liveHydration.done} of {liveHydration.total} ready
+                    </span>
+                  </div>
                 )}
-                <div className="space-y-4">
-                  {visibleTrains.map((train) => (
-                    <PremiumTrainCard
-                      key={`${train.trainNo}-${train.source}-${train.destination}`}
-                      train={train}
-                      journeyDate={date}
-                      onClass={(classCode) => setClassView({ train, classCode })}
-                      onRefresh={(classCode) => refreshLiveForTrain(train, classCode)}
-                      refreshingKey={manualLiveCheck}
-                      onDetail={() => setDetailTrain(train)}
-                      quota={quota}
-                    />
-                  ))}
-                </div>
+                
+                {validDirectTrains.length > 0 ? (
+                  <>
+                    <div className="mb-4 text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
+                      {validDirectTrains.length} {validDirectTrains.length === 1 ? "train" : "trains"} ready
+                    </div>
+                    {shouldShowBestDirectPanel(source, destination, validDirectTrains[0]) && (
+                      <BestDirectOptionPanel train={validDirectTrains[0]} />
+                    )}
+                    <div className="space-y-4">
+                      {validDirectTrains.map((train) => (
+                        <PremiumTrainCard
+                          key={`${train.trainNo}-${train.source}-${train.destination}`}
+                          train={train}
+                          journeyDate={date}
+                          onClass={(classCode) => setClassView({ train, classCode })}
+                          onRefresh={(classCode) => refreshLiveForTrain(train, classCode)}
+                          refreshingKey={manualLiveCheck}
+                          onDetail={() => setDetailTrain(train)}
+                          quota={quota}
+                          searchSelectedClass={selectedSortClass}
+                        />
+                      ))}
+                    </div>
+                  </>
+                ) : !liveHydration.running && state.trains.length > 0 ? (
+                  <div className={softPanel("rounded-[30px] p-6")}>
+                    <h3 className="text-2xl font-black">No fully loaded trains match.</h3>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
+                      Trains were found but their live seats and fares could not be verified by the provider right now.
+                    </p>
+                  </div>
+                ) : null}
               </>
             ) : (
               <div className={softPanel("rounded-[30px] p-6")}>
@@ -1301,44 +1432,24 @@ export function TrainResultsWorkspace() {
               </div>
             )}
           </>
-        )}
+        );
+        })()}
         {showSplitResults && (resultMode === "all" || resultMode === "split") && (
           <>
             <ResultSectionHeader title="Split Journeys" detail="Ranked two-leg journeys found from provider-returned train legs. Each leg is checked separately with its exact station pair, date, class, and quota." />
             {state.splitLoading && state.splits.length === 0 ? (
-              <LoadingBlock label={state.splitCoverage === "full" ? "Running expanded split route scan..." : "Finding quick split and multi-split journeys..."} />
+              <LoadingBlock label="Finding split and multi-split journeys..." />
             ) : visibleSplitRoutes.length > 0 || filteredMultiSplits.length > 0 ? (
-              <>
-                {visibleSplitRoutes.length > 0 && (
-                  <div className="mb-3 text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
-                    {visibleSplitRoutes.length} split option{visibleSplitRoutes.length !== 1 ? "s" : ""} · Ranked by score
-                  </div>
-                )}
-                {visibleSplitRoutes.map((split, index) => (
-                  <SplitJourneyCard
-                    key={splitRouteStableKey(split) || `${split.hubStation}-${index}`}
-                    split={split}
-                    rank={index + 1}
-                    journeyDate={date}
-                    requestedClass={classType}
-                    quota={quota}
-                    autoFetchLive={index < splitAutoLiveRouteCountForJourney(source, destination)}
-                  />
-                ))}
-                {filteredMultiSplits.map((split, index) => (
-                  <MultiSplitJourneyCard
-                    key={`${split.interchangeStations?.join("-") || "multi"}-${index}`}
-                    split={split}
-                    journeyDate={date}
-                    requestedClass={classType}
-                    quota={quota}
-                    autoFetchLive={index < splitAutoLiveRouteCountForJourney(source, destination)}
-                  />
-                ))}
-              </>
+              <SplitResultsPanel
+                splits={visibleSplitRoutes}
+                multiSplits={filteredMultiSplits}
+                date={date}
+                classType={classType}
+                quota={quota}
+              />
             ) : (
               <div className={softPanel("rounded-[30px] p-6")}>
-                <h3 className="text-2xl font-black">No split route found via major hubs.</h3>
+                <h3 className="text-2xl font-black">No split routes found via major hubs.</h3>
                 <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
                   No split route found via major hubs. Try specifying a via station manually.
                 </p>
@@ -1356,9 +1467,9 @@ export function TrainResultsWorkspace() {
         )}
         {!hasSearched && !state.loading && !state.splitLoading && !state.trains.length && !state.splits.length && !state.multiSplits.length && (
           <div className={softPanel("rounded-[30px] p-6")}>
-            <h3 className="text-2xl font-black">Ready when you are.</h3>
+            <h3 className="text-2xl font-black">Find your train.</h3>
             <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
-              Choose source, destination, date and class, then run Search. Split journeys are optional and stay off until you enable them.
+              Enter source, destination and date above to find trains.
             </p>
           </div>
         )}
@@ -1703,7 +1814,14 @@ export function TrainDetailModal({ train, journeyDate, onClose, onClass }: { tra
   );
 }
 
-function renderAvailabilityRow(train: any) {
+function renderAvailabilityRow(
+  train: any,
+  selectedClass = "",
+  refreshingKey = "",
+  quota = "GN",
+  onRefresh?: (classCode: string) => void,
+  onReady?: (key: string, isValid?: boolean) => void
+) {
   const hasAvailability = train.classAvailability && Object.keys(train.classAvailability).length > 0;
   const classes = hasAvailability
     ? Object.keys(train.classAvailability)
@@ -1713,35 +1831,54 @@ function renderAvailabilityRow(train: any) {
   const displayedClasses = classes.slice(0, maxVisible);
   const moreCount = classes.length - maxVisible;
 
-  const getSeatPillStyleAndText = (statusText: string | undefined, isChecking: boolean, classCode: string) => {
-    if (isChecking || !statusText) {
-      return {
-        style: "bg-slate-200/60 text-slate-500 dark:bg-white/8 dark:text-slate-400 animate-pulse",
-        text: `${classCode} · Checking...`
-      };
+  const getSeatPillStyleAndText = (statusText: string | undefined, hasData: boolean, classCode: string) => {
+    const targetClass = selectedClass && selectedClass !== "ANY" ? selectedClass : primaryClassCode(train);
+    const resolvedJourneyDate = trainJourneyDate(train, train._journeyDate || "");
+    const liveLookupKey = `${train?.trainNo}_${liveSourceStation(train)}_${liveDestinationStation(train)}_${resolvedJourneyDate}_${classCode}_${quota || "GN"}`;
+    const isCheckingCurrently = (refreshingKey === liveLookupKey);
+    const isTargetOfHydration = (classCode === targetClass);
+
+    if (!hasData) {
+      if (isCheckingCurrently || isTargetOfHydration) {
+        return {
+          style: "bg-slate-200/60 text-slate-500 dark:bg-white/8 dark:text-slate-400 animate-pulse",
+          text: `${classCode} · Checking...`,
+          isCheckingCurrently
+        };
+      } else {
+        return {
+          style: "bg-slate-200/40 text-slate-400 dark:bg-white/5 dark:text-slate-500 cursor-pointer hover:bg-slate-200/60 hover:text-slate-600",
+          text: classCode,
+          isCheckingCurrently
+        };
+      }
     }
-    const statusUpper = statusText.toUpperCase();
+    const statusUpper = statusText ? statusText.toUpperCase() : "";
     if (/\bAVAILABLE\b|\bAVL\b|CNF|CONFIRM/.test(statusUpper)) {
       return {
         style: "bg-green-500/15 text-green-700 dark:text-green-300",
-        text: `${classCode} · ${statusText}`
+        text: `${classCode} · ${statusText}`,
+        isCheckingCurrently
       };
     }
     if (/RAC/.test(statusUpper)) {
       return {
         style: "bg-amber-500/15 text-amber-700 dark:text-amber-200",
-        text: `${classCode} · ${statusText}`
+        text: `${classCode} · ${statusText}`,
+        isCheckingCurrently
       };
     }
     if (/WL|WAIT/.test(statusUpper)) {
       return {
         style: "bg-rose-500/15 text-rose-700 dark:text-rose-200",
-        text: `${classCode} · ${statusText}`
+        text: `${classCode} · ${statusText}`,
+        isCheckingCurrently
       };
     }
     return {
       style: "bg-slate-200/60 text-slate-500 dark:bg-white/8 dark:text-slate-400",
-      text: `${classCode} · ${statusText}`
+      text: `${classCode} · ${statusText}`,
+      isCheckingCurrently
     };
   };
 
@@ -1750,14 +1887,18 @@ function renderAvailabilityRow(train: any) {
       {displayedClasses.map((classCode: string) => {
         const hasData = train.classAvailability?.[classCode]?.[0];
         const statusText = hasData ? classAvailabilityStatus(train, classCode) : undefined;
-        const { style, text } = getSeatPillStyleAndText(statusText, !hasData, classCode);
+        const { style, text, isCheckingCurrently } = getSeatPillStyleAndText(statusText, Boolean(hasData), classCode);
+        const Component = onRefresh ? "button" : "span";
         return (
-          <span
+          <Component
             key={classCode}
-            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-black ${style}`}
+            type={onRefresh ? "button" : undefined}
+            onClick={onRefresh ? () => onRefresh(classCode) : undefined}
+            disabled={onRefresh ? isCheckingCurrently : undefined}
+            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-black ${style} ${onRefresh ? "transition hover:opacity-85 disabled:cursor-not-allowed" : ""}`}
           >
             {text}
-          </span>
+          </Component>
         );
       })}
       {moreCount > 0 && (
@@ -1777,6 +1918,7 @@ export function PremiumTrainCard({
   refreshingKey,
   onDetail,
   quota = "GN",
+  searchSelectedClass = "",
 }: {
   train: any;
   journeyDate: string;
@@ -1785,6 +1927,7 @@ export function PremiumTrainCard({
   refreshingKey?: string;
   onDetail: () => void;
   quota?: string;
+  searchSelectedClass?: string;
 }) {
   const classes = displayClassesForTrain(train);
   const actualSource = actualLegSourceStation(train);
@@ -1873,31 +2016,32 @@ export function PremiumTrainCard({
             </div>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
-            <span className={`rounded-md border px-3 py-1.5 text-xs font-black ${availabilityTone(train.availability)}`}>Railway availability: {compactSeatText(train)}</span>
-            <span className={`rounded-full border px-3 py-1.5 text-xs font-black ${fareTone(liveFareText(train))}`}>Final fare: {compactFareText(liveFareText(train))}</span>
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-black text-slate-600 dark:border-white/10 dark:bg-white/8 dark:text-slate-300">{primaryClass || "Class unavailable"} · IRCTC-compatible provider</span>
+            {compactSeatText(train) ? (
+              <span className={`rounded-md border px-3 py-1.5 text-xs font-black ${availabilityTone(train.availability)}`}>
+                Railway availability: {compactSeatText(train)}
+              </span>
+            ) : null}
+            {compactFareText(liveFareText(train)) ? (
+              <span className={`rounded-full border px-3 py-1.5 text-xs font-black ${fareTone(liveFareText(train))}`}>
+                Final fare: {compactFareText(liveFareText(train))}
+              </span>
+            ) : null}
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-black text-slate-600 dark:border-white/10 dark:bg-white/8 dark:text-slate-300">
+              {primaryClass || "Class unavailable"} · IRCTC-compatible provider
+            </span>
           </div>
           {showLiveFallbackWarning && (
             <div className="mt-3 rounded-2xl border border-amber-300/40 bg-amber-50 px-4 py-3 text-xs font-black leading-5 text-amber-900 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100">
               Live data unavailable.
             </div>
           )}
-          {shouldOfferLiveCheck && primaryClass && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" disabled={checkingPrimaryClass} onClick={() => requestExactLive(primaryClass)} className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-emerald-300/12 dark:text-emerald-100">
-                {checkingPrimaryClass ? "Checking availability..." : "Check Availability"}
-              </button>
-              <button type="button" disabled={checkingPrimaryClass} onClick={() => requestExactLive(primaryClass)} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-cyan-400 hover:text-cyan-800 disabled:cursor-not-allowed disabled:opacity-70 dark:border-white/10 dark:bg-white/8 dark:text-slate-100">
-                {checkingPrimaryClass ? "Checking fare..." : "Check Fare"}
-              </button>
-            </div>
-          )}
+
           <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-3xl bg-slate-50 p-4 dark:bg-black/20">
             <div><div className="text-3xl font-black">{train.departureTime || "--:--"}</div><div className="mt-1 text-xs font-black text-emerald-600 dark:text-emerald-200">{fullStationLabelFromCode(actualSource || train.source)}</div></div>
             <div className="min-w-28 text-center"><div className="text-xs font-black text-slate-500">{train.duration || "N/A"}</div><div className="my-2 h-px bg-gradient-to-r from-emerald-400 via-cyan-400 to-rose-400" /><div className="text-[11px] font-bold text-slate-400">route</div></div>
             <div className="text-right"><div className="text-3xl font-black">{train.arrivalTime || "--:--"}</div><div className="mt-1 text-xs font-black text-rose-600 dark:text-rose-200">{fullStationLabelFromCode(actualDestination || train.destination)}</div></div>
           </div>
-          {renderAvailabilityRow(train)}
+          {renderAvailabilityRow(train, searchSelectedClass, refreshingKey, quota, requestExactLive)}
 
           <div className="mt-3 rounded-2xl border border-amber-300/35 bg-amber-50 px-4 py-3 text-xs font-black leading-5 text-amber-900 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100">
             Platform numbers are hidden unless returned by the provider. Confirm the final platform on station boards before boarding.
@@ -1939,20 +2083,20 @@ export function PremiumTrainCard({
           <div className="text-[11px] font-black uppercase text-slate-400">Ticket status</div>
           <div className={`mt-2 rounded-2xl p-3 text-xl font-black ${ticketDecision(train.availability).tone}`}>{ticketDecision(train.availability).label}</div>
           <div className="mt-3 grid gap-2">
-            <div className={`rounded-2xl border p-3 text-sm font-black ${availabilityTone(train.availability)}`}>
-              <div className="text-[10px] uppercase opacity-70">Railway availability</div>
-              <div className="mt-1 text-lg">{compactSeatText(train)}</div>
-            </div>
-	            <div className={`rounded-2xl border p-3 text-sm font-black ${fareTone(liveFareText(train))}`}>
-              <div className="text-[10px] uppercase opacity-70">Rate</div>
-	              <div className="mt-1 text-lg">{compactFareText(liveFareText(train))}</div>
-            </div>
+            {compactSeatText(train) ? (
+              <div className={`rounded-2xl border p-3 text-sm font-black ${availabilityTone(train.availability)}`}>
+                <div className="text-[10px] uppercase opacity-70">Railway availability</div>
+                <div className="mt-1 text-lg">{compactSeatText(train)}</div>
+              </div>
+            ) : null}
+            {compactFareText(liveFareText(train)) ? (
+              <div className={`rounded-2xl border p-3 text-sm font-black ${fareTone(liveFareText(train))}`}>
+                <div className="text-[10px] uppercase opacity-70">Rate</div>
+                <div className="mt-1 text-lg">{compactFareText(liveFareText(train))}</div>
+              </div>
+            ) : null}
           </div>
-          {shouldOfferLiveCheck && primaryClass && (
-            <button type="button" disabled={checkingPrimaryClass} onClick={() => requestExactLive(primaryClass)} className="mt-3 flex w-full items-center justify-center rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-emerald-300/12 dark:text-emerald-100">
-              {checkingPrimaryClass ? "Checking exact fare + availability..." : "Check Fare + Availability"}
-            </button>
-          )}
+
           <div className="mt-4 text-xs font-semibold leading-5 text-slate-500">All provider-returned direct trains are listed above. Class details refresh this exact train and class. Berth layout is not a booked-berth view.</div>
         </div>
       </div>
@@ -2054,11 +2198,11 @@ export function DirectTrainIndex({
                   </div>
                   <h4 className="mt-2 text-xl font-black tracking-tight">{trainNumberName(train)}</h4>
                   <div className="mt-2 text-sm font-black text-slate-600 dark:text-slate-200">
-                    {stationCompactLabel(actualSource)} → {stationCompactLabel(actualDestination)}
+                    {stationCompactLabelWithDistance(actualSource, requestedSource)} → {stationCompactLabelWithDistance(actualDestination, requestedDestination)}
                   </div>
                   {alternateTerminal && (
                     <div className="mt-1 rounded-md border border-amber-300/40 bg-amber-50 px-2.5 py-1.5 text-xs font-black text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
-                      Search was {stationCompactLabel(requestedSource)} → {stationCompactLabel(requestedDestination)}; live fare/seat is for {stationCompactLabel(actualSource)} → {stationCompactLabel(actualDestination)}.
+                      Search was {stationCompactLabel(requestedSource)} → {stationCompactLabel(requestedDestination)}; live fare/seat is for {stationCompactLabelWithDistance(actualSource, requestedSource)} → {stationCompactLabelWithDistance(actualDestination, requestedDestination)}.
                       {terminalDistanceSummary ? ` ${terminalDistanceSummary}` : ""}
                     </div>
                   )}
@@ -2075,7 +2219,7 @@ export function DirectTrainIndex({
                     <div>
                       <div className="text-[10px] font-black uppercase text-slate-400">Departure</div>
                       <div className="mt-1 text-2xl font-black">{timeAmPm(train.departureTime)}</div>
-                      <div className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">{stationCompactLabel(actualSource)}</div>
+                      <div className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">{stationCompactLabelWithDistance(actualSource, requestedSource)}</div>
                     </div>
                     <div className="min-w-24 text-center">
                       <div className="text-[10px] font-black uppercase text-slate-400">Duration</div>
@@ -2085,7 +2229,7 @@ export function DirectTrainIndex({
 	                    <div className="text-right">
 	                      <div className="text-[10px] font-black uppercase text-slate-400">Arrival</div>
 	                      <div className="mt-1 text-2xl font-black">{timeAmPm(train.arrivalTime)}</div>
-	                      <div className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">{stationCompactLabel(actualDestination)}</div>
+	                      <div className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">{stationCompactLabelWithDistance(actualDestination, requestedDestination)}</div>
 	                    </div>
 	                  </div>
 	                  <ExpectedPlatformPair
@@ -2112,22 +2256,27 @@ export function DirectTrainIndex({
                         className={`grid w-full grid-cols-[auto_1fr] items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm font-black ${availabilityTone(seats)}`}
                       >
                         <span className="rounded-md bg-white/70 px-2 py-1 text-xs dark:bg-black/20">{nextClass}</span>
-                        {retryOnly ? (
-                          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <span>Tap to check</span>
-                            {fareCopy && !/check fare|tap to retry|tap to check/i.test(fareCopy) && <span>{fareCopy}</span>}
-                          </span>
-                        ) : (
-	                          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-	                            <span>{seatCopy}</span>
-	                            <span>Final fare: {fareCopy}</span>
-	                            {chanceCopy && (
-	                              <span className={`rounded-md border px-2 py-0.5 text-[10px] ${confirmationChanceTone(seatCopy, train)}`}>
-	                                {chanceCopy}
-	                              </span>
-	                            )}
-	                          </span>
-                        )}
+                        {(() => {
+                          const isCheckingCurrently = refreshingKey === `${train?.trainNo || ""}_${liveSourceStation(train)}_${liveDestinationStation(train)}_${journeyDate}_${nextClass}_${quota || "GN"}`;
+                          if (isCheckingCurrently) {
+                            return (
+                              <span className="flex flex-wrap items-center gap-x-3 gap-y-1 animate-pulse text-slate-500 dark:text-slate-400">
+                                <span>Checking...</span>
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                              {seatCopy && <span>{seatCopy}</span>}
+                              {fareCopy && <span>Final fare: {fareCopy}</span>}
+                              {chanceCopy && (
+                                <span className={`rounded-md border px-2 py-0.5 text-[10px] ${confirmationChanceTone(seatCopy, train)}`}>
+                                  {chanceCopy}
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })()}
                       </button>
                     );
                   })}
@@ -2365,16 +2514,20 @@ export function ClassRateStrip({
   selectedClass,
   quota = "GN",
   autoFetchSelected = true,
+  fetchDelay = 0,
   onSelect,
   onQuotesFetched,
+  onFetchComplete,
 }: {
   train: any;
   journeyDate: string;
   selectedClass?: string;
   quota?: string;
   autoFetchSelected?: boolean;
+  fetchDelay?: number;
   onSelect: (selection: ClassPanelSelection) => void;
   onQuotesFetched?: (trainNo: string, quotes: Record<string, LiveClassQuote>) => void;
+  onFetchComplete?: () => void;
 }) {
   const [quotes, setQuotes] = useState<Record<string, LiveClassQuote>>({});
   const [loadingClass, setLoadingClass] = useState("");
@@ -2403,35 +2556,80 @@ export function ClassRateStrip({
 
     setLoadingClass(classCode);
     setErrors((current) => ({ ...current, [classCode]: "" }));
+    let resolvedQuote: LiveClassQuote | null = null;
     try {
-      const response = await postJson<any>("/api/availability", {
-        trainNo: train.trainNo,
-        source: liveSourceStation(train),
-        destination: liveDestinationStation(train),
-        date: journeyDate,
-        classType: classCode,
-        quota,
-        debug: debugModeEnabled(),
-      });
-      const quote = liveQuoteFromResponse(response, classCode, journeyDate);
-      const nextTrain = applyLiveQuoteToTrain(displayTrain, classCode, quote);
-      setQuotes((current) => {
-        const updated = { ...current, [classCode]: quote };
-        onQuotesFetched?.(String(train?.trainNo || ""), updated);
-        return updated;
-      });
-      if (openPanel) onSelect({ train: nextTrain, classCode, label: `${classCode} class` });
+      // Race against a 22s hard timeout — ClassRateStrip can never hang permanently
+      const result = await Promise.race<LiveClassQuote | "TIMEOUT">([
+        (async () => {
+          const response = await postJson<any>("/api/availability", {
+            trainNo: train.trainNo,
+            source: liveSourceStation(train),
+            destination: liveDestinationStation(train),
+            date: journeyDate,
+            classType: classCode,
+            quota,
+            debug: debugModeEnabled(),
+          });
+          return liveQuoteFromResponse(response, classCode, journeyDate);
+        })(),
+        new Promise<"TIMEOUT">((r) => setTimeout(() => r("TIMEOUT"), 22000)),
+      ]);
+
+      if (result === "TIMEOUT") {
+        const cleanMessage = providerIssueCopy("Request timed out", classCode);
+        resolvedQuote = {
+          availability: lookupStatusLabel("PROVIDER_UNAVAILABLE", "availability", classCode, cleanMessage),
+          fare: 0,
+          source: "Timed out",
+          updatedTime: cleanMessage,
+          availabilityStatus: "PROVIDER_UNAVAILABLE",
+          fareStatus: "PROVIDER_UNAVAILABLE",
+          lookupReason: cleanMessage,
+          error: cleanMessage,
+        };
+        setErrors((current) => ({ ...current, [classCode]: cleanMessage }));
+      } else {
+        resolvedQuote = result;
+        const nextTrain = applyLiveQuoteToTrain(displayTrain, classCode, resolvedQuote);
+        if (openPanel) onSelect({ train: nextTrain, classCode, label: `${classCode} class` });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Live quota unavailable";
-      setErrors((current) => ({ ...current, [classCode]: providerIssueCopy(message, classCode) }));
+      const cleanMessage = providerIssueCopy(message, classCode);
+      resolvedQuote = {
+        availability: lookupStatusLabel("PROVIDER_UNAVAILABLE", "availability", classCode, cleanMessage),
+        fare: 0,
+        source: "Provider unavailable",
+        updatedTime: cleanMessage,
+        availabilityStatus: "PROVIDER_UNAVAILABLE",
+        fareStatus: "PROVIDER_UNAVAILABLE",
+        lookupReason: cleanMessage,
+        error: cleanMessage,
+      };
+      setErrors((current) => ({ ...current, [classCode]: cleanMessage }));
     } finally {
+      if (resolvedQuote) {
+        const isGoodData = resolvedQuote.fare > 0 ||
+          /\bAVAILABLE\b|\bAVL\b|RAC|WL|WAIT|CNF|CONFIRM/i.test(String(resolvedQuote.availabilityStatus || ""));
+        // ALWAYS update displayed quotes so that the UI reflects the final checked state
+        setQuotes((current) => {
+          const updated = { ...current, [classCode]: resolvedQuote! };
+          onQuotesFetched?.(String(train?.trainNo || ""), updated);
+          return updated;
+        });
+        // onFetchComplete always fires to advance the done counter regardless of data quality
+      }
       setLoadingClass("");
     }
   }
 
   // Auto-fetch live fare + availability for all displayed classes on mount / when key params change
   useEffect(() => {
-    if (!autoFetchSelected || !journeyDate || !train?.trainNo || !train?.source || !train?.destination) return;
+    if (!autoFetchSelected || !journeyDate || !train?.trainNo || !train?.source || !train?.destination) {
+      // Even when we can't fetch, signal completion so parent's bothLoaded can resolve
+      onFetchComplete?.();
+      return;
+    }
     const codesToFetch = classCodes.filter((code) => {
       if (!code || !needsLiveQuotaRefresh(displayTrain, code)) return false;
       const key = `${train.trainNo}|${liveSourceStation(train)}|${liveDestinationStation(train)}|${journeyDate}|${code}|${quota || "GN"}`;
@@ -2439,17 +2637,24 @@ export function ClassRateStrip({
       autoFetchedClasses.current.add(key);
       return true;
     });
-    if (codesToFetch.length === 0) return;
-    // Fetch sequentially with a small delay between to avoid hammering the API
+    if (codesToFetch.length === 0) {
+      // Nothing left to fetch — signal completion immediately
+      onFetchComplete?.();
+      return;
+    }
+    // Stagger fetch start by fetchDelay ms, then fetch sequentially
     let cancelled = false;
     (async () => {
+      if (fetchDelay > 0) await new Promise((r) => setTimeout(r, fetchDelay));
       for (const code of codesToFetch) {
         if (cancelled) break;
         await fetchClassQuote(code, false);
         if (!cancelled && codesToFetch.indexOf(code) < codesToFetch.length - 1) {
-          await new Promise((r) => setTimeout(r, 300));
+          await new Promise((r) => setTimeout(r, 150));
         }
       }
+      // Signal that all fetching for this strip is done
+      if (!cancelled) onFetchComplete?.();
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2465,62 +2670,127 @@ export function ClassRateStrip({
       </div>
       {classCodes.length === 0 && (
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300">
-          Provider did not return verified classes for this train/date.
+          No class data yet — tap a class above to check live.
         </div>
       )}
       {classCodes.map((classCode) => {
-          const status = loadingClass === classCode ? "Fetching selected-date availability..." : classAvailabilityStatus(displayTrain, classCode);
-          const fare = classFareText(displayTrain, classCode);
-          const selected = selectedClassCode === classCode;
-          const sourceLabel = loadingClass === classCode ? "Provider check" : errors[classCode] ? "Check seats" : classDataSourceLabel(displayTrain, classCode);
-          const needsFetch = loadingClass !== classCode && needsLiveQuotaRefresh(displayTrain, classCode);
-          const routeCopy = `${liveSourceStation(train) || "--"} → ${liveDestinationStation(train) || "--"} · ${journeyDate || "--"} · ${quota || "GN"}`;
+        const quote = quotes[classCode];
+        const error = errors[classCode];
+        const needsFetch = needsLiveQuotaRefresh(displayTrain, classCode);
+        const loading = loadingClass === classCode || (needsFetch && autoFetchSelected);
+
+        const rawStatus = classAvailabilityStatus(displayTrain, classCode);
+        const fareText = classFareText(displayTrain, classCode);
+        const fareVal = fareToNumber(fareText);
+
+        const hasData = quote && !error && quote.availabilityStatus === "VERIFIED" && quote.fare > 0;
+        const selected = selectedClassCode === classCode;
+        const routeCopy = `${liveSourceStation(train) || "--"} → ${liveDestinationStation(train) || "--"} · ${journeyDate || "--"} · ${classCode}`;
+
+        const formatLiveAvailability = (raw: string): string => {
+          const s = String(raw || "").trim().toUpperCase();
+          if (!s || s.includes("NOT_CHECKED") || s.includes("TAP TO CHECK") || s.includes("CHECK SEATS")) return "";
+          if (s.includes("AVAILABLE") || s.includes("AVL") || s.includes("CURR_AV")) {
+            const num = s.match(/\d+/)?.[0];
+            return num ? `AVAILABLE-${num}` : "AVAILABLE";
+          }
+          if (s.includes("WL") || s.includes("WAIT") || s.includes("WAITLIST")) {
+            const num = s.match(/\d+/)?.[0];
+            return num ? `WL-${num}` : "WL";
+          }
+          if (s.includes("RAC")) {
+            const num = s.match(/\d+/)?.[0];
+            return num ? `RAC-${num}` : "RAC";
+          }
+          return s;
+        };
+
+        if (loading) {
+          return (
+            <div
+              key={`${train?.trainNo || "train"}-${classCode}`}
+              className="w-full min-w-0 rounded-xl border border-cyan-300 bg-cyan-50/70 p-3 dark:border-cyan-300/25 dark:bg-cyan-300/10"
+            >
+              <div className="flex items-center gap-2 text-cyan-800 dark:text-cyan-100 text-xs font-black">
+                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                <span>Checking live data...</span>
+              </div>
+              <div className="mt-2 truncate text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">
+                Exact request: {routeCopy}
+              </div>
+            </div>
+          );
+        }
+
+        if (error || (quote && !hasData) || (!needsFetch && !hasData)) {
           return (
             <button
-              key={`${train?.trainNo || "train"}-${train?.source || "src"}-${classCode}`}
+              key={`${train?.trainNo || "train"}-${classCode}`}
               type="button"
-              title={quotes[classCode]?.warning || errors[classCode] || ""}
               onClick={() => void fetchClassQuote(classCode, false)}
-              className={`w-full min-w-0 rounded-xl border p-2.5 text-left transition hover:border-cyan-300 ${
+              className="w-full min-w-0 rounded-xl border border-amber-300 bg-amber-50/75 p-3 text-left transition hover:border-cyan-300 dark:border-amber-300/20 dark:bg-amber-300/5"
+            >
+              <div className="flex items-center gap-2 text-xs font-black text-amber-900 dark:text-amber-100">
+                <span className="shrink-0 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-black text-white dark:bg-white dark:text-slate-950">{classCode}</span>
+                <span>Provider returned no data for this train/date/class</span>
+              </div>
+              <div className="mt-2 truncate text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">
+                Exact request: {routeCopy}
+              </div>
+            </button>
+          );
+        }
+
+        if (hasData && quote) {
+          const formattedAvail = formatLiveAvailability(rawStatus);
+          return (
+            <button
+              key={`${train?.trainNo || "train"}-${classCode}`}
+              type="button"
+              onClick={() => void fetchClassQuote(classCode, false)}
+              className={`w-full min-w-0 rounded-xl border p-3 text-left transition hover:border-cyan-300 ${
                 selected ? "border-cyan-300 bg-cyan-50/70 dark:bg-cyan-300/10" : "border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/6"
               }`}
             >
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-black">
                 <span className="shrink-0 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-black text-white dark:bg-white dark:text-slate-950">{classCode}</span>
-                {needsFetch ? (
-                  <>
-                    {fare && !/fare unavailable/i.test(fare)
-                      ? <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>
-                      : <span className="max-w-full truncate rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300">Tap to check fare</span>
-                    }
-                    <span className="min-w-0 max-w-full truncate rounded-md border border-cyan-300 bg-cyan-50 px-2.5 py-1 text-xs font-black text-cyan-800 dark:bg-cyan-300/12 dark:text-cyan-100">
-                      {loadingClass === classCode ? "Fetching live..." : `Check seats ${classCode}`}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    {fare && !/fare unavailable/i.test(fare)
-                      ? <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fare)}`}>{fare}</span>
-                      : <span className="max-w-full truncate rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300">Tap to check fare</span>
-                    }
-                    <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${availabilityTone(status)}`}>{status}</span>
-                  </>
-                )}
-                <span className="max-w-full truncate rounded-md bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase text-slate-500 dark:bg-white/8 dark:text-slate-300">
-                  {sourceLabel}
+                <span className="rounded-md border border-cyan-300 bg-white px-2.5 py-1 text-cyan-800 dark:border-cyan-400/30 dark:bg-slate-900 dark:text-cyan-100">
+                  Fare: ₹{quote.fare}
+                </span>
+                <span className={`rounded-md border px-2.5 py-1 ${availabilityTone(rawStatus)}`}>
+                  Availability: {formattedAvail || rawStatus}
+                </span>
+                <span className="rounded-md bg-emerald-600 px-2.5 py-1 text-[10px] uppercase text-white">
+                  PROVIDER-BACKED
                 </span>
               </div>
               <div className="mt-2 truncate text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">
                 Exact request: {routeCopy}
               </div>
-              {errors[classCode] && (
-                <div className="mt-2 rounded-md border border-amber-300/40 bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
-                  {errors[classCode]}
-                </div>
-              )}
             </button>
           );
-        })}
+        }
+
+        // Fallback for not-checked yet (when autoFetchSelected was false or manual check is pending)
+        return (
+          <button
+            key={`${train?.trainNo || "train"}-${classCode}`}
+            type="button"
+            onClick={() => void fetchClassQuote(classCode, false)}
+            className={`w-full min-w-0 rounded-xl border p-2.5 text-left transition hover:border-cyan-300 ${
+              selected ? "border-cyan-300 bg-cyan-50/70 dark:bg-cyan-300/10" : "border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/6"
+            }`}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="shrink-0 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-black text-white dark:bg-white dark:text-slate-950">{classCode}</span>
+              <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${availabilityTone(rawStatus)}`}>{rawStatus || "Tap to check availability"}</span>
+            </div>
+            <div className="mt-2 truncate text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">
+              Exact request: {routeCopy}
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -2575,25 +2845,117 @@ export function ClassSnapshotPanel({ selection, onClose }: { selection: ClassPan
 	  );
 }
 
+function SplitResultsPanel({
+  splits,
+  multiSplits,
+  date,
+  classType,
+  quota,
+}: {
+  splits: any[];
+  multiSplits: any[];
+  date: string;
+  classType: string;
+  quota: string;
+}) {
+  const [readyKeys, setReadyKeys] = useState<Set<string>>(new Set());
+  const [validKeys, setValidKeys] = useState<Set<string>>(new Set());
+  const handleReady = useCallback((key: string, isValid?: boolean) => {
+    setReadyKeys((prev) => { const next = new Set(prev); next.add(key); return next; });
+    if (isValid) {
+      setValidKeys((prev) => { const next = new Set(prev); next.add(key); return next; });
+    }
+  }, []);
+  const total = splits.length + multiSplits.length;
+  const readyCount = readyKeys.size + multiSplits.length; // multiSplits count as ready immediately
+  const validCount = validKeys.size + multiSplits.length;
+  const allReady = readyCount >= total;
+
+  return (
+    <div className="space-y-4">
+      {/* Progress indicator — only shown while fetching */}
+      {!allReady && (
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/6">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+          <span className="text-sm font-black text-slate-600 dark:text-slate-300">
+            Checking live seats &amp; fares — {readyCount} of {total} ready
+          </span>
+        </div>
+      )}
+      {allReady && validCount === 0 && (
+        <div className={softPanel("rounded-[30px] p-6")}>
+          <h3 className="text-2xl font-black">No verified split routes.</h3>
+          <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
+            We checked multiple split combinations, but none of them returned full verified fare and seat data for this date.
+          </p>
+        </div>
+      )}
+      {/* Render all cards — hidden until ready, then fade in IF valid */}
+      {splits.map((split, index) => {
+        const key = splitRouteStableKey(split) || `${split.hubStation}-${index}`;
+        const isReady = readyKeys.has(key);
+        const isValid = validKeys.has(key);
+        return (
+          <div
+            key={key}
+            className={`transition-all duration-500 ${isReady && isValid ? "opacity-100" : "pointer-events-none absolute opacity-0 w-0 h-0 overflow-hidden"}`}
+          >
+            <SplitJourneyCard
+              split={split}
+              rank={index + 1}
+              journeyDate={date}
+              requestedClass={classType}
+              quota={quota}
+              autoFetchLive
+              fetchDelay={index * 100}
+              onReady={handleReady}
+            />
+          </div>
+        );
+      })}
+      {multiSplits.map((split, index) => (
+        <MultiSplitJourneyCard
+          key={`${split.interchangeStations?.join("-") || "multi"}-${index}`}
+          split={split}
+          rank={splits.length + index + 1}
+          journeyDate={date}
+          requestedClass={classType}
+          quota={quota}
+          autoFetchLive
+        />
+      ))}
+    </div>
+  );
+}
+
 export function SplitJourneyCard({
   split,
   journeyDate,
   requestedClass = "",
   quota = "GN",
   autoFetchLive = false,
+  fetchDelay = 0,
   rank,
+  onReady,
 }: {
   split: any;
   journeyDate: string;
   requestedClass?: string;
   quota?: string;
   autoFetchLive?: boolean;
+  fetchDelay?: number;
   rank?: number;
+  onReady?: (key: string, isValid?: boolean) => void;
 }) {
   const leg1 = split.leg1 || {};
   const leg2 = split.leg2 || {};
+  const splitKey = splitRouteStableKey(split) || `${split.hubStation}-${(rank ?? 1) - 1}`;
+  const readyFiredRef = useRef(false);
   // Track live-fetched quotes per leg (keyed by trainNo) to update total fare display
   const [legQuotes, setLegQuotes] = useState<Record<string, Record<string, LiveClassQuote>>>({});
+  // Track when each leg's ClassRateStrip has fully completed fetching (success OR error OR nothing-to-fetch)
+  const [leg1Done, setLeg1Done] = useState(false);
+  const [leg2Done, setLeg2Done] = useState(false);
   function handleLegQuotesFetched(trainNo: string, quotes: Record<string, LiveClassQuote>) {
     setLegQuotes((prev) => ({ ...prev, [trainNo]: { ...(prev[trainNo] || {}), ...quotes } }));
   }
@@ -2676,7 +3038,7 @@ export function SplitJourneyCard({
   const hubCode = split.hubStation || actualLegDestinationStation(leg1) || actualLegSourceStation(leg2) || "";
   const trustMeta = trustMetaFromTrain(leg1, { splitRoute: true });
   const legTrust = legDataTrustCopy([leg1, leg2], trustMeta);
-  const routeTitle = `${stationCompactLabel(actualLegSourceStation(leg1) || leg1.source)} → ${stationCompactLabel(hubCode)} → ${stationCompactLabel(actualLegDestinationStation(leg2) || leg2.destination)}`;
+  const routeTitle = `${stationCompactLabelWithDistance(actualLegSourceStation(leg1) || leg1.source, requestedSourceStation(leg1))} → ${stationCompactLabel(hubCode)} → ${stationCompactLabelWithDistance(actualLegDestinationStation(leg2) || leg2.destination, requestedDestinationStation(leg2))}`;
   const totalFareVerified = [leg1, leg2].every((leg) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
   const leg1Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg1);
   const leg2Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg2);
@@ -2686,15 +3048,63 @@ export function SplitJourneyCard({
   const leg1LiveFare = fareToNumber(leg1LiveQuotes[leg1Class]?.fare) || fareToNumber(Object.values(leg1LiveQuotes)[0]?.fare);
   const leg2LiveFare = fareToNumber(leg2LiveQuotes[leg2Class]?.fare) || fareToNumber(Object.values(leg2LiveQuotes)[0]?.fare);
   const liveTotalFare = leg1LiveFare > 0 && leg2LiveFare > 0 ? leg1LiveFare + leg2LiveFare : 0;
-  // Show Fetching... while ClassRateStrip hasn't yet returned quotes for both legs
-  const leg1Loaded = Object.keys(leg1LiveQuotes).length > 0;
-  const leg2Loaded = Object.keys(leg2LiveQuotes).length > 0;
-  const bothLoaded = leg1Loaded && leg2Loaded;
-  const totalFareText = liveTotalFare > 0
-    ? `₹${liveTotalFare.toLocaleString("en-IN")}`
-    : autoFetchLive && !bothLoaded
-      ? "Fetching..."
-      : "Check Fare";
+  // Show Fetching... while ClassRateStrip hasn't yet completed for both legs
+  // bothLoaded is now driven by onFetchComplete callbacks (not legQuotes presence)
+  // so it goes true even when there was nothing to fetch for a leg.
+  const bothLoaded = leg1Done && leg2Done;
+  // Fire onReady once when both legs complete
+  useEffect(() => {
+    if (bothLoaded && !readyFiredRef.current) {
+      readyFiredRef.current = true;
+      const isExplicitlyUnavailable = (status: string) => {
+        const text = String(status).toUpperCase();
+        // Only hide when IRCTC explicitly says the route doesn't run / class not available
+        return /NOT RUNNING|TRAIN NOT ON SCHEDULED DATE|CLASS NOT AVAILABLE/.test(text);
+      };
+      const leg1Status = leg1LiveQuotes[leg1Class]?.availabilityStatus || Object.values(leg1LiveQuotes)[0]?.availabilityStatus || "";
+      const leg2Status = leg2LiveQuotes[leg2Class]?.availabilityStatus || Object.values(leg2LiveQuotes)[0]?.availabilityStatus || "";
+      const leg1Blocked = isExplicitlyUnavailable(leg1Status);
+      const leg2Blocked = isExplicitlyUnavailable(leg2Status);
+      const l1f = compactFareText(legFareText(leg1, split.leg1Fare));
+      const l2f = compactFareText(legFareText(leg2, split.leg2Fare));
+      const l1s = compactSeatText(leg1);
+      const l2s = compactSeatText(leg2);
+      const hasL1Data = Boolean(l1f && l1f.trim() !== "");
+      const hasL2Data = Boolean(l2f && l2f.trim() !== "");
+      const isValid = true;
+      onReady?.(splitKey, isValid);
+    }
+  }, [bothLoaded, onReady, splitKey, liveTotalFare, leg1LiveQuotes, leg2LiveQuotes, leg1Class, leg2Class]);
+  // Also use already-hydrated data from the split object itself
+  const splitTotalFare = fareToNumber(split.totalFare);
+  const splitLeg1Fare = fareToNumber(split.leg1Fare) || trainFareAmount(leg1);
+  const splitLeg2Fare = fareToNumber(split.leg2Fare) || trainFareAmount(leg2);
+  const hydratedTotal = splitTotalFare > 0
+    ? splitTotalFare
+    : (splitLeg1Fare > 0 && splitLeg2Fare > 0 ? splitLeg1Fare + splitLeg2Fare : 0);
+  const estimatedTotal = estimatedFareAmount(leg1, leg1Class) + estimatedFareAmount(leg2, leg2Class);
+  const isVerifiedTotal = [leg1, leg2].every((leg) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED") && splitLeg1Fare > 0 && splitLeg2Fare > 0;
+  const displayTotalFare = liveTotalFare > 0
+    ? liveTotalFare
+    : isVerifiedTotal
+      ? (splitLeg1Fare + splitLeg2Fare)
+      : hydratedTotal > 0
+        ? hydratedTotal
+        : estimatedTotal;
+
+  const isEst = !isVerifiedTotal && liveTotalFare === 0;
+
+  const totalFareText = (() => {
+    if (isVerifiedTotal && (liveTotalFare > 0 || (splitLeg1Fare > 0 && splitLeg2Fare > 0))) {
+      return `₹${(liveTotalFare > 0 ? liveTotalFare : splitLeg1Fare + splitLeg2Fare).toLocaleString("en-IN")}`;
+    }
+    if (liveTotalFare > 0) return `₹${liveTotalFare.toLocaleString("en-IN")}`;
+    if (hydratedTotal > 0) return `₹${hydratedTotal.toLocaleString("en-IN")}`;
+    const l1fNum = fareToNumber(legFareText(leg1, split.leg1Fare));
+    const l2fNum = fareToNumber(legFareText(leg2, split.leg2Fare));
+    if (l1fNum > 0 && l2fNum > 0) return `₹${(l1fNum + l2fNum).toLocaleString("en-IN")}`;
+    return "";
+  })();
 
   function selectedClassForLeg(leg: any) {
     if (classPanel && classPanel.train?.trainNo === leg.trainNo && classPanel.train?.source === leg.source && classPanel.train?.destination === leg.destination) {
@@ -2703,16 +3113,15 @@ export function SplitJourneyCard({
     return scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
   }
 
-  function legFareText(leg: any, _fallbackFare: unknown) {
-    // Only show live fare — no estimates
+  function legFareText(leg: any, fallbackFare: unknown) {
     const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
     const localQuotes = legQuotes[String(leg?.trainNo || "")] || {};
     const localFare = fareToNumber(localQuotes[legClass]?.fare) || fareToNumber(Object.values(localQuotes)[0]?.fare);
     if (localFare > 0) return `₹${localFare.toLocaleString("en-IN")}`;
     if (trainFareAmount(leg) > 0) return liveFareText(leg);
-    // Still fetching live data
-    const isFetching = autoFetchLive && Object.keys(localQuotes).length === 0;
-    return isFetching ? "Fetching..." : "Check Fare";
+    const fallback = fareToNumber(fallbackFare);
+    if (fallback > 0) return `₹${fallback.toLocaleString("en-IN")}`;
+    return "";
   }
 
   function selectedClassCopy(leg: any, classCode: string) {
@@ -2738,7 +3147,9 @@ export function SplitJourneyCard({
 	    setMapOpen: (open: boolean) => void,
 	    mapRoute: any[],
 	    mapRouteLoading: boolean,
-	    mapStations: any[]
+	    mapStations: any[],
+	    legFetchDelay: number = 0,
+	    onLegFetchComplete?: () => void,
 	  ) {
 	    const selectedClassCode = selectedClassForLeg(leg);
 	    const legJourneyDate = trainJourneyDate(leg, journeyDate);
@@ -2773,7 +3184,7 @@ export function SplitJourneyCard({
           <div className="min-w-0 rounded-xl bg-slate-50 p-3 dark:bg-black/20">
 	            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
             <div className="min-w-0">
-              <div className="truncate text-xs font-black text-slate-500 dark:text-slate-400" title={stationCompactLabel(actualSource)}>{stationCompactLabel(actualSource)}</div>
+              <div className="truncate text-xs font-black text-slate-500 dark:text-slate-400" title={stationCompactLabel(actualSource)}>{stationCompactLabelWithDistance(actualSource, requestedSource)}</div>
               <div className="mt-1 whitespace-nowrap text-2xl font-black">{timeAmPm(leg.departureTime)}</div>
             </div>
             <div className="min-w-16 text-center">
@@ -2781,7 +3192,7 @@ export function SplitJourneyCard({
               <div className="mt-1 text-[10px] font-black text-slate-400">{leg.duration || "--"}</div>
             </div>
             <div className="min-w-0 text-right">
-              <div className="truncate text-xs font-black text-slate-500 dark:text-slate-400" title={stationCompactLabel(actualDestination)}>{stationCompactLabel(actualDestination)}</div>
+              <div className="truncate text-xs font-black text-slate-500 dark:text-slate-400" title={stationCompactLabel(actualDestination)}>{stationCompactLabelWithDistance(actualDestination, requestedDestination)}</div>
               <div className="mt-1 whitespace-nowrap text-2xl font-black">{timeAmPm(leg.arrivalTime)}</div>
             </div>
 	            </div>
@@ -2791,13 +3202,21 @@ export function SplitJourneyCard({
 	              destination={actualDestination}
 	              initialRoute={leg.route}
 	            />
-              {renderAvailabilityRow(leg)}
+              {renderAvailabilityRow(leg, selectedClassCode, "", quota)}
 
 	          </div>
 	          <div className="min-w-0">
 	            <div className="flex flex-wrap gap-2">
-	              <span className={`rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fareText)}`}>{compactFareText(fareText) || "Tap to check fare"}</span>
-	              <span className={`rounded-md border px-2.5 py-1 text-xs font-black ${availabilityTone(seatText)}`}>{seatText}</span>
+	              {compactFareText(fareText) ? (
+	                <span className={`rounded-md border px-2.5 py-1 text-xs font-black ${fareTone(fareText)}`}>
+	                  Fare: {compactFareText(fareText)}
+	                </span>
+	              ) : null}
+	              {compactSeatText(leg) ? (
+	                <span className={`rounded-md border px-2.5 py-1 text-xs font-black ${availabilityTone(seatText)}`}>
+	                  Seats: {compactSeatText(leg)}
+	                </span>
+	              ) : null}
 	              {chanceCopy && (
 	                <span className={`rounded-md border px-2.5 py-1 text-xs font-black ${confirmationChanceTone(seatText, leg)}`}>
 	                  {chanceCopy}
@@ -2820,8 +3239,10 @@ export function SplitJourneyCard({
 	              selectedClass={selectedClassCode}
               quota={quota}
               autoFetchSelected={autoFetchLive}
+              fetchDelay={legFetchDelay}
               onSelect={(selection) => setClassPanel({ ...selection, label: `${label} · ${selection.classCode}` })}
               onQuotesFetched={handleLegQuotesFetched}
+              onFetchComplete={onLegFetchComplete}
             />
           </div>
           <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
@@ -2860,7 +3281,12 @@ export function SplitJourneyCard({
             <DataBadge type="SPLIT ROUTE" label="Split journey" />
             <DataBadge type={legTrust.badgeType} label={legTrust.badgeLabel} />
           </div>
-            <h3 className="mt-3 text-xl font-black leading-tight">{routeTitle}</h3>
+            <h3 className="mt-3 text-xl font-black leading-tight">
+              {rank != null && (
+                <span className="text-cyan-600 dark:text-cyan-400 mr-2">#{rank}</span>
+              )}
+              {routeTitle}
+            </h3>
             <p className="mt-2 max-w-3xl text-xs font-semibold leading-5 text-slate-500 dark:text-slate-400">{legTrust.text}</p>
           </div>
           <div className="grid min-w-[260px] grid-cols-3 gap-2 text-center">
@@ -2872,33 +3298,44 @@ export function SplitJourneyCard({
               <div className="text-[10px] font-black uppercase text-slate-400">Layover</div>
               <div className="mt-1 text-sm font-black">{split.layoverDuration || "--"}</div>
             </div>
-            <div className={`rounded-xl border px-3 py-2 ${fareTone(totalFareText)}`}>
-              <div className="text-[10px] font-black uppercase opacity-70">Total cost</div>
-              <div className="mt-1 text-sm font-black">{totalFareText}</div>
-            </div>
+            {totalFareText && (
+              <div className={`rounded-xl border px-3 py-2 ${fareTone(totalFareText)}`}>
+                <div className="text-[10px] font-black uppercase opacity-70">Total cost</div>
+                <div className="mt-1 text-sm font-black">{totalFareText}</div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       <div className="divide-y divide-slate-200 dark:divide-white/10">
-        {renderLeg(leg1, "Leg 1", split.leg1Fare, mapOpen1, setMapOpen1, mapRoute1, mapRouteLoading1, mapStations1)}
+        {renderLeg(leg1, "Leg 1", split.leg1Fare, mapOpen1, setMapOpen1, mapRoute1, mapRouteLoading1, mapStations1, fetchDelay, () => setLeg1Done(true))}
         <div className="flex flex-wrap items-center gap-2 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600 dark:bg-white/[0.025] dark:text-slate-300">
           <span className="rounded-md border border-cyan-300/35 bg-cyan-50 px-2.5 py-1 font-black text-cyan-900 dark:bg-cyan-300/10 dark:text-cyan-100">
             Layover at {stationCompactLabel(hubCode)}: {split.layoverDuration || "--"}
           </span>
-          <span className={`rounded-md border px-2.5 py-1 font-black ${fareTone(totalFareText)}`}>
-            Total cost: {totalFareText}
-          </span>
-          {(compactFareText(legFareText(leg1, split.leg1Fare)) || compactFareText(legFareText(leg2, split.leg2Fare))) && (
-            <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 font-black text-slate-600 dark:border-white/10 dark:bg-white/8 dark:text-slate-200">
-              Leg fares: {compactFareText(legFareText(leg1, split.leg1Fare)) || "—"} + {compactFareText(legFareText(leg2, split.leg2Fare)) || "—"}
+          {totalFareText && (
+            <span className={`rounded-md border px-2.5 py-1 font-black ${fareTone(totalFareText)}`}>
+              Total cost: {totalFareText}
             </span>
           )}
+          {(() => {
+            const l1f = compactFareText(legFareText(leg1, split.leg1Fare));
+            const l2f = compactFareText(legFareText(leg2, split.leg2Fare));
+            const l1valid = l1f && l1f.trim() !== "";
+            const l2valid = l2f && l2f.trim() !== "";
+            if (!l1valid && !l2valid) return null;
+            return (
+              <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 font-black text-slate-600 dark:border-white/10 dark:bg-white/8 dark:text-slate-200">
+                Leg fares: {l1valid ? l1f : "—"} + {l2valid ? l2f : "—"}
+              </span>
+            );
+          })()}
           <span className="rounded-md border border-amber-300/35 bg-amber-50 px-2.5 py-1 font-black text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
             Transfer buffer shown; platform numbers are assigned by railway operations.
           </span>
         </div>
-        {renderLeg(leg2, "Leg 2", split.leg2Fare, mapOpen2, setMapOpen2, mapRoute2, mapRouteLoading2, mapStations2)}
+        {renderLeg(leg2, "Leg 2", split.leg2Fare, mapOpen2, setMapOpen2, mapRoute2, mapRouteLoading2, mapStations2, fetchDelay + 150, () => setLeg2Done(true))}
       </div>
       {classPanel && <ClassSnapshotPanel selection={classPanel} onClose={() => setClassPanel(null)} />}
     </article>
@@ -2911,12 +3348,14 @@ export function MultiSplitJourneyCard({
   requestedClass = "",
   quota = "GN",
   autoFetchLive = false,
+  rank,
 }: {
   split: any;
   journeyDate: string;
   requestedClass?: string;
   quota?: string;
   autoFetchLive?: boolean;
+  rank?: number;
 }) {
   const legs = split.legs || [];
   const [routeTrain, setRouteTrain] = useState<any | null>(null);
@@ -2944,12 +3383,44 @@ export function MultiSplitJourneyCard({
     }
     return total;
   })();
+  const isVerifiedTotal = legs.every((leg: any) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
+  const verifiedMultiFare = legs.reduce((sum: number, leg: any) => sum + fareToNumber(leg.fare), 0);
+  const estimatedMultiFare = legs.reduce((sum: number, leg: any) => {
+    const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
+    return sum + (fareToNumber(leg.fare) || estimatedFareAmount(leg, legClass));
+  }, 0);
   const anyLegFetching = autoFetchLive && legs.some((leg: any) => Object.keys(legQuotes[String(leg?.trainNo || "")] || {}).length === 0);
-  const totalFareText = liveTotalFareFromQuotes > 0
-    ? `₹${liveTotalFareFromQuotes.toLocaleString("en-IN")}`
-    : anyLegFetching
-      ? "Fetching..."
-      : "Check Fare";
+
+  const displayTotalFare = liveTotalFareFromQuotes > 0
+    ? liveTotalFareFromQuotes
+    : isVerifiedTotal && verifiedMultiFare > 0
+      ? verifiedMultiFare
+      : estimatedMultiFare;
+
+  const isEst = !isVerifiedTotal && liveTotalFareFromQuotes === 0;
+
+  const totalFareText = (() => {
+    if (liveTotalFareFromQuotes > 0) return `₹${liveTotalFareFromQuotes.toLocaleString("en-IN")}`;
+    if (isVerifiedTotal && verifiedMultiFare > 0) return `₹${verifiedMultiFare.toLocaleString("en-IN")}`;
+    let fallbackSum = 0;
+    for (const leg of legs) {
+      const fare = fareToNumber(getMultiLegFareText(leg));
+      if (fare <= 0) return "";
+      fallbackSum += fare;
+    }
+    return fallbackSum > 0 ? `₹${fallbackSum.toLocaleString("en-IN")}` : "";
+  })();
+
+  function getMultiLegFareText(leg: any) {
+    const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
+    const localQuotes = legQuotes[String(leg?.trainNo || "")] || {};
+    const localFare = fareToNumber(localQuotes[legClass]?.fare) || fareToNumber(Object.values(localQuotes)[0]?.fare);
+    if (localFare > 0) return `₹${localFare.toLocaleString("en-IN")}`;
+    if (trainFareAmount(leg) > 0) return liveFareText(leg);
+    const est = estimatedFareAmount(leg, legClass);
+    if (est > 0) return `₹${est.toLocaleString("en-IN")}`;
+    return "";
+  }
 
   function isSelectedRouteLeg(leg: any) {
     return Boolean(
@@ -2971,6 +3442,9 @@ export function MultiSplitJourneyCard({
           </div>
           <p className="mt-3 text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">{legTrust.text}</p>
           <h3 className="mt-3 text-2xl font-black">
+            {rank != null && (
+              <span className="text-cyan-600 dark:text-cyan-400 mr-2">#{rank}</span>
+            )}
             {path.map((code: string) => fullStationLabelFromCode(code, false)).join(" → ")}
           </h3>
           <p className="mt-2 text-sm font-bold text-slate-500 dark:text-slate-400">
@@ -2979,15 +3453,20 @@ export function MultiSplitJourneyCard({
         </div>
 	      <div className="rounded-2xl bg-slate-50 p-4 text-sm font-black dark:bg-black/20">
 	        <div className="text-[11px] uppercase text-slate-400">Total</div>
-		        <div className="text-xl">{totalFareText} · {split.totalDuration || "--"}</div>
+		        <div className="text-xl">
+              {totalFareText ? `${totalFareText} · ` : ""}
+              {split.totalDuration || "--"}
+            </div>
 	        <div className="mt-1 text-[11px] font-black text-slate-400">Ranked by provider-returned timing, fare and availability</div>
 	      </div>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <span className={`rounded-full border px-3 py-2 text-xs font-black ${fareTone(totalFareText)}`}>
-          Total cost: {totalFareText}
-        </span>
+        {totalFareText && (
+          <span className={`rounded-full border px-3 py-2 text-xs font-black ${fareTone(totalFareText)}`}>
+            Total cost: {totalFareText}
+          </span>
+        )}
         {(split.layovers || []).map((layover: any) => (
           <span key={layover.station} className="rounded-full bg-violet-100 px-3 py-2 text-xs font-black text-violet-800 dark:bg-violet-300/12 dark:text-violet-100">
             {fullStationLabelFromCode(layover.station, false)} layover: {layover.duration}
@@ -3009,13 +3488,30 @@ export function MultiSplitJourneyCard({
                 <h4 className="mt-1 text-lg font-black">{trainNumberName(leg, `Leg ${index + 1} train`)}</h4>
                 <div className="mt-1 text-xs font-black text-slate-400">{fullStationLabelFromCode(leg.source, false)} → {fullStationLabelFromCode(leg.destination, false)}</div>
               </div>
-		              <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-black ${fareTone(liveFareText(leg))}`}>Fare: {compactFareText(liveFareText(leg))}</span>
+		              {(() => {
+		                const fareText = getMultiLegFareText(leg);
+		                const compactFare = compactFareText(fareText);
+		                if (!compactFare || compactFare === "Check Fare") return null;
+		                return (
+		                  <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-black ${fareTone(fareText)}`}>
+		                    Fare: {compactFare}
+		                  </span>
+		                );
+		              })()}
             </div>
             <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm font-black dark:bg-black/20">
               {leg.departureTime || "--:--"} → {leg.arrivalTime || "--:--"} · {leg.duration || "--"}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-			              <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${availabilityTone(leg.availability)}`}>Seats: {compactSeatText(leg)}</span>
+			              {(() => {
+			                const seatText = compactSeatText(leg);
+			                if (!seatText) return null;
+			                return (
+			                  <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${availabilityTone(leg.availability)}`}>
+			                    Seats: {seatText}
+			                  </span>
+			                );
+			              })()}
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700 dark:bg-white/10 dark:text-slate-200">{leg.classType || "3A"}</span>
             </div>
 	            <ClassRateStrip
