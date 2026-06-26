@@ -5,6 +5,11 @@ import { availabilityReasonForStatus, fareReasonForStatus } from "@/lib/railway-
 import { getClientIp, isRateLimited } from "@/lib/rate-limiter";
 import { getVerifiedAvailability } from "@/services/availabilityService";
 
+// The client (ClassRateStrip) already waits up to 22s for a live quote — give the
+// function room to match that instead of risking a platform-default timeout cutting
+// it off first.
+export const maxDuration = 30;
+
 export async function POST(request: Request) {
   const requestId = `avail_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   const ip = getClientIp(request);

@@ -3,6 +3,13 @@ import { buildTrustMeta } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
 
+// Verifying live fare + seat availability for ~30 split-journey candidates means
+// dozens of provider calls inside one request. The previous implicit default
+// (10s on most Vercel plans) was getting hit mid-enrichment, which is the main
+// reason split search used to come back sparse or empty. 60s gives the
+// enrichment budget below (see enrichDeadlineMs) real room to work with.
+export const maxDuration = 60;
+
 function localRecommendation(directTrains: any[], splitRoutes: any[], multiSplitRoutes: any[] = [], budget?: string) {
   const budgetNote = budget ? ` Budget filter requested: ${budget}.` : "";
   return `Provider returned ${directTrains?.length || 0} direct train(s), ${splitRoutes?.length || 0} two-leg split option(s), and ${multiSplitRoutes?.length || 0} multi-leg split option(s).${budgetNote}`;
@@ -58,8 +65,8 @@ export async function POST(request: Request) {
       maxMultiLegOptions: 0,
       maxMultiCandidates: 0,
       maxMultiResults: 0,
-      plannerLegTimeoutMs: 3500,
-      globalTimeoutMs: 6000,
+      plannerLegTimeoutMs: 5000,
+      globalTimeoutMs: 9000,
     } as const;
 
     const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);
@@ -73,7 +80,7 @@ export async function POST(request: Request) {
             maxMultiCandidates: 80,
             maxMultiResults: 16,
           }),
-          1500,
+          3000,
           []
         );
 
@@ -161,10 +168,15 @@ export async function POST(request: Request) {
     // We do NOT discard routes that fail enrichment — they remain as fallbacks.
     // Enrich ALL routes in true parallel — no serial bail-out guard that starves later routes.
     // Every route starts simultaneously; the whole batch races against a shared deadline.
-    const LIVE_TOP_SPLIT = Math.min(diverseRoutes.length, 20);
+    //
+    // Try to verify all 30 candidates, not just the first 20 — with maxDuration=60 and a
+    // higher provider concurrency (see irctcService.ts) there's now real room to do this,
+    // and the ranking step below means a slow/unverified candidate no longer means an
+    // empty slot — it just ranks below the candidates that did verify in time.
+    const LIVE_TOP_SPLIT = Math.min(diverseRoutes.length, 30);
     if (LIVE_TOP_SPLIT > 0) {
-      const enrichDeadlineMs = 8500; // total budget from API start
-      const perRouteTimeoutMs = 6000; // per-route cap so one slow route can't block others
+      const enrichDeadlineMs = 38000; // total budget from API start, well inside maxDuration=60
+      const perRouteTimeoutMs = 9000; // per-route cap so one slow route can't block others
 
       const enrichRoute = async (route: any) => {
         const legDate = route.leg1Date || route.leg2Date || date;
@@ -191,7 +203,7 @@ export async function POST(request: Request) {
         }
       };
 
-      const timeRemaining = Math.max(2000, enrichDeadlineMs - (Date.now() - apiStartTime));
+      const timeRemaining = Math.max(4000, enrichDeadlineMs - (Date.now() - apiStartTime));
       await Promise.race([
         Promise.all(diverseRoutes.slice(0, LIVE_TOP_SPLIT).map(enrichRoute)),
         new Promise((resolve) => setTimeout(resolve, timeRemaining))
@@ -222,32 +234,51 @@ export async function POST(request: Request) {
       return Number(fareStr.replace(/[^\d.]/g, '')) || 0;
     };
 
-    // Filter split routes globally based on Step 3:
-    const finalRoutes = diverseRoutes.filter(route => {
-      // 1. Only show split cards where at least leg 1 has confirmed fare + availability from provider
-      if (!isLegVerifiedAndBookable(route.leg1)) {
-        return false;
-      }
-
-      // 2. "Not bookable on this date" for selected class → remove entire split card
+    // Hard-exclude only what's factually wrong — a leg that IRCTC explicitly rejected,
+    // or a card with literally no fare on either leg. These aren't "couldn't verify in
+    // time" situations, they're "this combination cannot be booked" situations.
+    const candidatePool = diverseRoutes.filter(route => {
       if (isNotBookable(route.leg1) || isNotBookable(route.leg2)) {
         return false;
       }
       if (isLegDefinitelyRejected(route.leg1) || isLegDefinitelyRejected(route.leg2)) {
         return false;
       }
-
-      // 3. Both legs returning no fare after retry → remove entire split card
       const f1 = parseFareVal(route.leg1.fare);
       const f2 = parseFareVal(route.leg2.fare);
       if (f1 === 0 && f2 === 0) {
         return false;
       }
-
       return true;
     });
 
-    let filteredSplitRoutes = finalRoutes.slice(0, 15);
+    // Rank by real data quality rather than just slicing diversity order: routes where
+    // both legs came back fully verified (live fare + visible seats) rank highest, routes
+    // with only one leg verified rank next, and anything still unverified after the
+    // enrichment window keeps its pre-enrichment estimate score as a tiebreaker. This is
+    // what makes "best 15 of 30" actually mean best — previously the first 15 in diversity
+    // order were shown even when a worse-but-verified route sat further down the list, and
+    // a single slow leg could knock an otherwise-good card out of the results entirely.
+    const verificationBoost = (route: any) => {
+      const leg1Ok = isLegVerifiedAndBookable(route.leg1);
+      const leg2Ok = isLegVerifiedAndBookable(route.leg2);
+      if (leg1Ok && leg2Ok) return 200;
+      if (leg1Ok || leg2Ok) return 90;
+      return 0;
+    };
+
+    const rankedCandidates = candidatePool
+      .map((route, idx) => ({
+        route,
+        finalScore: (typeof route.score === 'number' ? route.score : 50) + verificationBoost(route) - idx * 0.01,
+      }))
+      .sort((a, b) => b.finalScore - a.finalScore)
+      .map((entry) => entry.route);
+
+    let filteredSplitRoutes = rankedCandidates.slice(0, 15);
+    const fullyVerifiedCount = filteredSplitRoutes.filter(
+      (route) => isLegVerifiedAndBookable(route.leg1) && isLegVerifiedAndBookable(route.leg2)
+    ).length;
 
     const LIVE_TOP_MULTI = Math.min(2, multiSplitRoutes.length);
     if (LIVE_TOP_MULTI > 0) {
@@ -265,7 +296,7 @@ export async function POST(request: Request) {
         }
       });
 
-      const timeRemainingMulti = Math.max(500, 8800 - (Date.now() - apiStartTime));
+      const timeRemainingMulti = Math.max(1500, 40000 - (Date.now() - apiStartTime));
       await Promise.race([
         Promise.all(promises),
         new Promise((resolve) => setTimeout(resolve, timeRemainingMulti))
@@ -303,6 +334,8 @@ export async function POST(request: Request) {
         routeRecommendation,
         coverageMode,
         canExpand: filteredSplitRoutes.length >= plannerOptions.maxSplitResults,
+        splitCandidatesConsidered: diverseRoutes.length,
+        splitFullyVerifiedCount: fullyVerifiedCount,
       },
     });
   } catch (error: any) {

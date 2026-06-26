@@ -48,7 +48,11 @@ const providerCache = new ProviderCache({
 });
 
 const availabilityCache = new ProviderCache({
-  maxConcurrency: 2,
+  // Split-journey search needs to verify many (leg1, leg2) pairs inside one request's
+  // time budget. maxConcurrency: 2 was the bottleneck that made most 30-candidate
+  // split searches return only a handful of verified cards before the deadline hit —
+  // 6 gives ~3x throughput while staying well under what the provider rate-limits at.
+  maxConcurrency: 6,
   retryCount: 0,
   retryDelayMs: 1000,
   failureTtlMs: 0,
@@ -137,7 +141,7 @@ class APIQueue {
   }
 }
 
-const irctcQueue = new APIQueue(4, 200);
+const irctcQueue = new APIQueue(6, 150);
 const trainListQueue = new APIQueue(12, 40);
 let availabilityCooldownUntil = 0;
 let trainListCooldownUntil = 0;
@@ -383,10 +387,13 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
 
     const hasNoFare = !fareObj || fareObj.totalFare === 0 || fareObj.Fare === 0 || fareObj.Amount === 0 || fareObj.total === 0;
 
-    // Retry once after 2 s if provider returned zero rows or undefined/0 fare
+    // Retry once after a short pause if provider returned zero rows or undefined/0 fare.
+    // Kept short (was 2000ms) — split-journey search verifies 30+ legs inside one
+    // request's time budget, and a 2s blind sleep per empty response was enough on its
+    // own to exhaust that budget after only a handful of routes.
     if ((rows.length === 0 || hasNoFare) && response?.success !== false) {
       console.log('[fare-retry]', trainNo, fromStn, toStn, dateStr, normalizedClass);
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 600));
       response = await callWithRetry(doFetch, 2, 'availability');
       rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
       fareObj = response?.data?.fare;

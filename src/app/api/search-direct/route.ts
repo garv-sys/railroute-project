@@ -2,6 +2,8 @@ import { checkDirectTrains } from '@/services/trainService';
 import { trustMetaForTrainList } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 
+export const maxDuration = 30;
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();

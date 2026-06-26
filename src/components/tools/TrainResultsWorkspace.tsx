@@ -132,6 +132,7 @@ export function TrainResultsWorkspace() {
     splits: any[];
     multiSplits: any[];
   }>({ loading: false, splitLoading: false, splitCoverage: "none", error: "", trains: [], splits: [], multiSplits: [] });
+  const [splitStats, setSplitStats] = useState<{ candidatesConsidered: number; fullyVerifiedCount: number }>({ candidatesConsidered: 0, fullyVerifiedCount: 0 });
   const [liveHydration, setLiveHydration] = useState<LiveHydrationState>(emptyLiveHydration);
   const [manualLiveCheck, setManualLiveCheck] = useState("");
   const [classView, setClassView] = useState<{ train: any; classCode: string } | null>(null);
@@ -600,6 +601,7 @@ export function TrainResultsWorkspace() {
     splitAutoCheckedRouteCount.current = 0;
     setResultMode("all");
     setLiveHydration(emptyLiveHydration);
+    setSplitStats({ candidatesConsidered: 0, fullyVerifiedCount: 0 });
     queuedTargets.current.clear();
     if ((!override || override.pushUrl) && typeof window !== "undefined") {
       try {
@@ -693,6 +695,10 @@ export function TrainResultsWorkspace() {
             splits: splitRoutes,
             multiSplits: multiSplitRoutes,
           }));
+          setSplitStats((current) => ({
+            candidatesConsidered: current.candidatesConsidered + (split?.splitCandidatesConsidered || 0),
+            fullyVerifiedCount: current.fullyVerifiedCount + (split?.splitFullyVerifiedCount || 0),
+          }));
           // split auto hydration is handled on mount by ClassRateStrip in SplitJourneyCard
           const liveLimit = Math.max(15, splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination));
           const priorityRoutes = splitRoutes.slice(0, liveLimit);
@@ -720,6 +726,10 @@ export function TrainResultsWorkspace() {
           const splitRoutes = split?.splitRoutes || split?.data?.splitRoutes || [];
           const multiSplitRoutes = split?.multiSplitRoutes || split?.data?.multiSplitRoutes || [];
           splitCountForRequest += splitRoutes.length + multiSplitRoutes.length;
+          setSplitStats((current) => ({
+            candidatesConsidered: current.candidatesConsidered + (split?.splitCandidatesConsidered || 0),
+            fullyVerifiedCount: current.fullyVerifiedCount + (split?.splitFullyVerifiedCount || 0),
+          }));
           return { splitRoutes, multiSplitRoutes };
         })
         .catch(() => {
@@ -1436,7 +1446,14 @@ export function TrainResultsWorkspace() {
         })()}
         {showSplitResults && (resultMode === "all" || resultMode === "split") && (
           <>
-            <ResultSectionHeader title="Split Journeys" detail="Ranked two-leg journeys found from provider-returned train legs. Each leg is checked separately with its exact station pair, date, class, and quota." />
+            <ResultSectionHeader
+              title="Split Journeys"
+              detail={
+                splitStats.candidatesConsidered > 0
+                  ? `Best ${Math.min(visibleSplitRoutes.length, 15)} of ${splitStats.candidatesConsidered} two-leg combinations considered — ${splitStats.fullyVerifiedCount} with live-verified fare & seats so far. Each leg is checked separately with its exact station pair, date, class, and quota.`
+                  : "Ranked two-leg journeys found from provider-returned train legs. Each leg is checked separately with its exact station pair, date, class, and quota."
+              }
+            />
             {state.splitLoading && state.splits.length === 0 ? (
               <LoadingBlock label="Finding split and multi-split journeys..." />
             ) : visibleSplitRoutes.length > 0 || filteredMultiSplits.length > 0 ? (
