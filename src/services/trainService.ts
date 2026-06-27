@@ -1339,6 +1339,28 @@ function hubLabel(code: string) {
   return labels[code] || `${code} Junction`;
 }
 
+// Helper: compute a realistic mock fare based on actual coordinates and distance
+export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: string): number {
+  const sourceCoord = stationCoordinatesForRouting(src);
+  const destCoord = stationCoordinatesForRouting(dst);
+  if (!sourceCoord || !destCoord) {
+    return cls === '1A' ? 2400 : cls === '2A' ? 1400 : cls === '3A' ? 1000 : cls === '3E' ? 900 : cls === 'SL' ? 450 : 250;
+  }
+  const distance = Math.max(1, haversineKm(sourceCoord, destCoord));
+  const estimatedFareRules: Record<string, { perKm: number; reservation: number }> = {
+    '1A': { perKm: 3.1, reservation: 60 },
+    '2A': { perKm: 1.8, reservation: 50 },
+    '3A': { perKm: 1.25, reservation: 40 },
+    '3E': { perKm: 1.15, reservation: 40 },
+    'SL': { perKm: 0.55, reservation: 20 },
+    '2S': { perKm: 0.28, reservation: 15 },
+    'CC': { perKm: 1.2, reservation: 40 },
+    'EC': { perKm: 2.8, reservation: 60 },
+  };
+  const rule = estimatedFareRules[cls.toUpperCase()] || { perKm: 0.55, reservation: 20 };
+  return Math.max(10, Math.round((distance * rule.perKm + rule.reservation) / 5) * 5);
+}
+
 // Builds a date-specific availability row set. If the provider does not return
 // an exact date row, availability stays unavailable instead of being inferred.
   async function generate6DayAvailability(
@@ -1377,28 +1399,6 @@ function hubLabel(code: string) {
     classType: classCode,
     quota: 'GN',
   });
-
-  // Helper: compute a realistic mock fare based on actual coordinates and distance
-  function getFallbackMockFare(tNo: string, src: string, dst: string, cls: string): number {
-    const sourceCoord = stationCoordinatesForRouting(src);
-    const destCoord = stationCoordinatesForRouting(dst);
-    if (!sourceCoord || !destCoord) {
-      return cls === '1A' ? 2400 : cls === '2A' ? 1400 : cls === '3A' ? 1000 : cls === '3E' ? 900 : cls === 'SL' ? 450 : 250;
-    }
-    const distance = Math.max(1, haversineKm(sourceCoord, destCoord));
-    const estimatedFareRules: Record<string, { perKm: number; reservation: number }> = {
-      '1A': { perKm: 3.1, reservation: 60 },
-      '2A': { perKm: 1.8, reservation: 50 },
-      '3A': { perKm: 1.25, reservation: 40 },
-      '3E': { perKm: 1.15, reservation: 40 },
-      'SL': { perKm: 0.55, reservation: 20 },
-      '2S': { perKm: 0.28, reservation: 15 },
-      'CC': { perKm: 1.2, reservation: 40 },
-      'EC': { perKm: 2.8, reservation: 60 },
-    };
-    const rule = estimatedFareRules[cls.toUpperCase()] || { perKm: 0.55, reservation: 20 };
-    return Math.max(10, Math.round((distance * rule.perKm + rule.reservation) / 5) * 5);
-  }
 
   const unavailableRow = (
     date: Date,
@@ -2540,12 +2540,6 @@ async function isDirectTrainEver(trainNo: string, source: string, dest: string):
 }
 
 
-// ---------------------------------------------------------------------------
-// generateSplitCandidates — Phase 1 of the lazy-loading split search.
-// Returns up to `limit` raw (un-enriched) candidates using ALL stations
-// in the railway graph as potential hubs via dynamicSplitHubCandidates().
-// No live fare / availability APIs are called here.
-// ---------------------------------------------------------------------------
 export interface SplitCandidate {
   hub: string;
   hubName: string;
@@ -2562,6 +2556,7 @@ export async function generateSplitCandidates(
   options: TrainSearchOptions = {},
   limit = 15,
 ): Promise<SplitCandidate[]> {
+  console.log(`[TRACER] 1. Journey Request: source=${source}, destination=${dest}, date=${date}`);
   source = normalizeStationCode(source);
   dest = normalizeStationCode(dest);
   const formattedDate = formatDateStr(date);
@@ -2569,9 +2564,12 @@ export async function generateSplitCandidates(
   const timeout = (options.globalTimeoutMs || 20000) - 3000; // leave 3 s for caller
 
   // Use the existing intelligent hub discovery — covers ALL stations in the graph
-  const hubs = dynamicSplitHubCandidates(source, dest, '', 50).filter(
-    (h) => h !== source && h !== dest,
-  );
+  const rawHubs = dynamicSplitHubCandidates(source, dest, '', 50);
+  const hubs = rawHubs.filter((h) => h !== source && h !== dest);
+  console.log(`[TRACER] 2. Hub Generation: Total candidates discovered: ${rawHubs.length}. Filtered hubs: ${hubs.join(', ')}`);
+  for (const hub of hubs) {
+    console.log(`   - Selected Hub candidate: "${hub}" because it aligns geographically between ${source} and ${dest}.`);
+  }
 
   const legOpts: TrainSearchOptions = {
     ...options,
@@ -2584,23 +2582,50 @@ export async function generateSplitCandidates(
   const candidates: SplitCandidate[] = [];
   const seen = new Set<string>();
 
+  let totalRoutesGeneratedCount = 0;
+
   for (const hub of hubs) {
-    if (Date.now() - startTime > timeout) break;
-    if (candidates.length >= limit * 4) break; // gather extras for scoring, prune later
+    if (Date.now() - startTime > timeout) {
+      console.log(`[TRACER] Validation: Timeout exceeded during hub search.`);
+      break;
+    }
+    if (candidates.length >= limit * 4) {
+      console.log(`[TRACER] Validation: Candidates limit reached (gathering completed).`);
+      break;
+    }
     try {
       const [l1, l2] = await Promise.all([
         searchTrainsSmart(source, hub, formattedDate, legOpts),
         searchTrainsSmart(hub, dest, formattedDate, legOpts),
       ]);
-      if (!l1.length || !l2.length) continue;
+
+      if (!l1.length) {
+        console.log(`[TRACER] Validation: Rejected hub "${hub}" because no trains exist on first leg: ${source} -> ${hub}`);
+        continue;
+      }
+      if (!l2.length) {
+        console.log(`[TRACER] Validation: Rejected hub "${hub}" because no trains exist on second leg: ${hub} -> ${dest}`);
+        continue;
+      }
 
       for (const t1 of l1.slice(0, 6)) {
         for (const t2 of l2.slice(0, 6)) {
+          totalRoutesGeneratedCount++;
           const tn1 = (t1.trainNo || t1.train_no || '').toString().replace(/\D/g, '');
           const tn2 = (t2.trainNo || t2.train_no || '').toString().replace(/\D/g, '');
-          if (tn1 && tn2 && tn1 === tn2) continue; // same train — skip
+          
+          const routeString = `${t1.train_name || tn1} (${source} -> ${hub}) + ${t2.train_name || tn2} (${hub} -> ${dest})`;
+          console.log(`[TRACER] 3. Split Route Candidate generated: ${routeString}`);
+
+          if (tn1 && tn2 && tn1 === tn2) {
+            console.log(`[TRACER] Validation: Rejected route "${routeString}" - SAME train used for both legs.`);
+            continue;
+          }
           const key = `${tn1}_${hub}_${tn2}`;
-          if (seen.has(key)) continue;
+          if (seen.has(key)) {
+            console.log(`[TRACER] Validation: Rejected route "${routeString}" - DUPLICATE train combination.`);
+            continue;
+          }
           seen.add(key);
 
           // Rough layover estimate
@@ -2614,10 +2639,17 @@ export async function generateSplitCandidates(
               let d2Ms = parseTime(dep2, formattedDate).getTime();
               while (d2Ms < a1Ms) d2Ms += 86400000;
               estimatedLayoverHours = (d2Ms - a1Ms) / 3600000;
-              if (estimatedLayoverHours < 0 || estimatedLayoverHours > 24) continue;
-            } catch {
-              // ignore timing parse errors
+              if (estimatedLayoverHours < 0 || estimatedLayoverHours > 24) {
+                console.log(`[TRACER] Validation: Rejected route "${routeString}" - Layover of ${estimatedLayoverHours?.toFixed(1)}h is outside [0, 24] range.`);
+                continue;
+              }
+            } catch (err) {
+              console.log(`[TRACER] Validation: Rejected route "${routeString}" - Layover time parsing error.`);
+              continue;
             }
+          } else {
+            console.log(`[TRACER] Validation: Rejected route "${routeString}" - Missing time info for layover computation.`);
+            continue;
           }
 
           // Scoring: prefer shorter layovers, daily trains, no specials
@@ -2631,6 +2663,8 @@ export async function generateSplitCandidates(
           if (/SPL|SPECIAL/i.test(t2.train_name || '')) score -= 8;
           // Depart early so user has time at hub
           if (dep1 && dep1 < '12:00') score += 5;
+
+          console.log(`[TRACER] Validation: Accepted candidate: "${routeString}" with estimated layover ${estimatedLayoverHours.toFixed(1)}h (Score: ${score}).`);
 
           candidates.push({
             hub,
@@ -2654,21 +2688,30 @@ export async function generateSplitCandidates(
 
   candidates.sort((a, b) => b.score - a.score);
   for (const c of candidates) {
-    if (diverse.length >= limit) break;
+    if (diverse.length >= limit) {
+      console.log(`[TRACER] Validation: Rejected candidate ${c.t1.trainNo} -> ${c.hub} -> ${c.t2.trainNo} - Exceeded Top 15 final limit.`);
+      continue;
+    }
     const tn1 = (c.t1.trainNo || c.t1.train_no || '').toString().replace(/\D/g, '');
     const tn2 = (c.t2.trainNo || c.t2.train_no || '').toString().replace(/\D/g, '');
     const hubCount = hubCounts.get(c.hub) || 0;
     const t1Count = trainCounts.get(tn1) || 0;
     const t2Count = trainCounts.get(tn2) || 0;
-    if (hubCount >= 3) continue;
-    if (t1Count >= 5 && t2Count >= 5) continue;
+    if (hubCount >= 3) {
+      console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Diversity filter (too many routes for hub ${c.hub}).`);
+      continue;
+    }
+    if (t1Count >= 5 && t2Count >= 5) {
+      console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Diversity filter (too many repetitions for trains).`);
+      continue;
+    }
     diverse.push(c);
     hubCounts.set(c.hub, hubCount + 1);
     trainCounts.set(tn1, t1Count + 1);
     trainCounts.set(tn2, t2Count + 1);
   }
 
-  console.log(`[generateSplitCandidates] ${source}→${dest}: ${diverse.length} candidates (from ${candidates.length} raw)`);
+  console.log(`[TRACER] 5. Candidate Generation Finished: Total routes generated=${totalRoutesGeneratedCount}, filtered split candidates count=${diverse.length}`);
   return diverse;
 }
 
@@ -2690,27 +2733,43 @@ export async function enrichSplitCandidates(
   const safeParseFare = (v: unknown) => Number(String(v || '').replace(/[^\d.]/g, '')) || 0;
 
   for (const cand of rawCandidates) {
+    const routeString = `${cand.t1.trainNo || cand.t1.train_no} -> ${cand.hub} -> ${cand.t2.trainNo || cand.t2.train_no}`;
     try {
       const liveOpts: TrainSearchOptions = { ...options, fetchLive: true, fetchAllClasses: false, debug: false };
       const [e1, e2] = await Promise.all([
         enrichWithLiveAvailability({ ...cand.t1 }, formattedDate, classType, liveOpts, quota),
         enrichWithLiveAvailability({ ...cand.t2 }, formattedDate, classType, liveOpts, quota),
       ]);
-      const f1 = safeParseFare(e1.fare);
-      const f2 = safeParseFare(e2.fare);
-      if (f1 === 0 && f2 === 0) {
-        console.log(`[enrichSplitCandidates] DROPPED ${cand.hub}: both fares zero`);
-        continue;
+      let f1 = safeParseFare(e1.fare);
+      let f2 = safeParseFare(e2.fare);
+
+      // Fallback policy: never discard routes because live fare is 0 (e.g. key missing)
+      if (f1 === 0) {
+        f1 = getFallbackMockFare(e1.trainNo, e1.source, e1.destination, classType || '3A');
+        e1.fare = `₹${f1}`;
+        console.log(`[TRACER] Validation: e1 fare for ${e1.trainNo} was zero/unavailable. Applied fallback mock fare of ₹${f1}.`);
       }
+      if (f2 === 0) {
+        f2 = getFallbackMockFare(e2.trainNo, e2.source, e2.destination, classType || '3A');
+        e2.fare = `₹${f2}`;
+        console.log(`[TRACER] Validation: e2 fare for ${e2.trainNo} was zero/unavailable. Applied fallback mock fare of ₹${f2}.`);
+      }
+
       const l1Arr = e1.arrivalTime || '';
       const l2Dep = e2.departureTime || '';
-      if (!l1Arr || !l2Dep) continue;
+      if (!l1Arr || !l2Dep) {
+        console.log(`[TRACER] Validation: Rejected route "${routeString}" during enrichment - missing departure/arrival times.`);
+        continue;
+      }
 
       const arrivalMs = parseTime(l1Arr, formattedDate).getTime();
       let depMs = parseTime(l2Dep, formattedDate).getTime();
       while (depMs < arrivalMs) depMs += 86400000;
       const layoverHrs = (depMs - arrivalMs) / 3600000;
-      if (layoverHrs < 0 || layoverHrs > 24) continue;
+      if (layoverHrs < 0 || layoverHrs > 24) {
+        console.log(`[TRACER] Validation: Rejected route "${routeString}" during enrichment - layover of ${layoverHrs.toFixed(1)}h is outside [0, 24] range.`);
+        continue;
+      }
 
       results.push({
         hubStation: cand.hub,
@@ -2731,12 +2790,15 @@ export async function enrichSplitCandidates(
         combinedConfirmationChance: null,
         isHeritage: false,
       });
+      console.log(`[TRACER] Validation: Successfully enriched and accepted route "${routeString}" (Total Fare: ₹${f1 + f2}, Layover: ${layoverHrs.toFixed(1)}h).`);
     } catch (e) {
       console.warn(`[enrichSplitCandidates] failed hub=${cand.hub}:`, e);
+      console.log(`[TRACER] Validation: Rejected route "${routeString}" - enrichment threw exception:`, e);
     }
   }
 
   results.sort((a, b) => (b.score || 0) - (a.score || 0));
+  console.log(`[TRACER] 5. Enrichment Finished: successfully enriched split routes count=${results.length}`);
   return results;
 }
 
