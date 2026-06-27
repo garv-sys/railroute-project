@@ -3,6 +3,9 @@ import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
 import { buildTrustMeta } from '@/lib/confidence';
 
+export const dynamic = 'force-dynamic';
+
+
 export async function POST(request: Request) {
   const requestId = `ssc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   const ip = getClientIp(request);

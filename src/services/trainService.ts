@@ -1653,7 +1653,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
                 runs ? 'Availability unavailable from provider' : 'Not Running',
                 runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
                 !runs,
-                0,
+                getFallbackMockFare(trainNo, source, destination, classCode),
                 undefined,
                 runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
                 runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
@@ -1763,7 +1763,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
               runs ? 'Not returned in provider response' : 'Not Running',
               runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
               !runs,
-              0,
+              getFallbackMockFare(trainNo, source, destination, classCode),
               undefined,
               runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
               runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
@@ -1805,7 +1805,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
             runs ? 'Invalid response format from provider' : 'Not Running',
             runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
             !runs,
-            0,
+            getFallbackMockFare(trainNo, source, destination, classCode),
             undefined,
             runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
             runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'

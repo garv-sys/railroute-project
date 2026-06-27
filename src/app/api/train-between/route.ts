@@ -3,7 +3,9 @@ import { trustMetaForTrainList } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
 
+export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
+
 
 export async function POST(request: Request) {
   const requestId = `tb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
