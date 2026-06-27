@@ -217,12 +217,6 @@ export function TrainResultsWorkspace() {
     const fareLimit = Number(maxFare) || Infinity;
     const durationLimit = maxDuration ? Number(maxDuration) * 60 : Infinity;
     return dedupeSplitRoutes(state.splits).filter((split) => {
-      // Step 3 Filters:
-      // 1. Only show split cards where at least leg 1 has confirmed fare + availability from provider
-      if (!hasVerifiedFareAndSeat(split.leg1, selectedSortClass || "")) {
-        return false;
-      }
-
       // 2. "Not bookable on this date" for selected class on either leg -> remove entire split card
       const isNotBookableLeg = (leg: any) => {
         const code = resolveClassCode(leg, selectedSortClass || "");
@@ -239,7 +233,7 @@ export function TrainResultsWorkspace() {
       // 3. Both legs returning no fare after retry -> remove entire split card
       const f1 = selectedSortClass ? classFareAmount(split.leg1, selectedSortClass) : trainFareAmount(split.leg1);
       const f2 = selectedSortClass ? classFareAmount(split.leg2, selectedSortClass) : trainFareAmount(split.leg2);
-      if (!f1 && !f2) {
+      if (!f1 && !f2 && !split.totalFare) {
         return false;
       }
       // Search query filter for splits
