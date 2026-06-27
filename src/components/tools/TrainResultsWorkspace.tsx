@@ -3123,14 +3123,12 @@ export function SplitJourneyCard({
   const isEst = !isVerifiedTotal && liveTotalFare === 0;
 
   const totalFareText = (() => {
-    if (isVerifiedTotal && (liveTotalFare > 0 || (splitLeg1Fare > 0 && splitLeg2Fare > 0))) {
-      return `₹${(liveTotalFare > 0 ? liveTotalFare : splitLeg1Fare + splitLeg2Fare).toLocaleString("en-IN")}`;
-    }
-    if (liveTotalFare > 0) return `₹${liveTotalFare.toLocaleString("en-IN")}`;
-    if (hydratedTotal > 0) return `₹${hydratedTotal.toLocaleString("en-IN")}`;
     const l1fNum = fareToNumber(legFareText(leg1, split.leg1Fare));
     const l2fNum = fareToNumber(legFareText(leg2, split.leg2Fare));
-    if (l1fNum > 0 && l2fNum > 0) return `₹${(l1fNum + l2fNum).toLocaleString("en-IN")}`;
+    if (l1fNum > 0 || l2fNum > 0) {
+      return `₹${(l1fNum + l2fNum).toLocaleString("en-IN")}`;
+    }
+    if (hydratedTotal > 0) return `₹${hydratedTotal.toLocaleString("en-IN")}`;
     return "";
   })();
 
