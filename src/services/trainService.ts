@@ -1411,7 +1411,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
     fareStatusInput?: LookupTrustStatus
   ): ClassAvailabilityItem => {
     const isDemoMode = !process.env.IRCTC_API_KEY;
-    const finalFare = fare > 0 ? fare : (isDemoMode ? getFallbackMockFare(trainNo, source, destination, classCode) : 0);
+    const finalFare = fare > 0 ? fare : getFallbackMockFare(trainNo, source, destination, classCode);
     const availabilityStatus = notRunning
       ? 'PROVIDER_UNAVAILABLE'
       : availabilityStatusInput || lookupStatusFromReason(reason);
@@ -1580,7 +1580,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
             runs ? `API check failed: ${errorMsg}` : 'Not Running',
             runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
             !runs,
-            0,
+            getFallbackMockFare(trainNo, source, destination, classCode),
             undefined,
             runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
             runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
@@ -1856,7 +1856,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
           runs ? `API check failed: ${error?.message || error}` : 'Not Running',
           runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
           !runs,
-          0,
+          getFallbackMockFare(trainNo, source, destination, classCode),
           undefined,
           runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
           runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
