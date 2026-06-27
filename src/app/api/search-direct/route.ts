@@ -7,13 +7,13 @@ export const maxDuration = 30;
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { source, destination, date, classType = "Any", debug = false } = body;
+    const { source, destination, date, classType = "Any", quota = "GN", debug = false } = body;
 
     if (!source || !destination || !date) {
       return validationFailure('Missing required parameters');
     }
 
-    const directTrains = await checkDirectTrains(source, destination, date, classType, { debug: Boolean(debug) });
+    const directTrains = await checkDirectTrains(source, destination, date, classType, { debug: Boolean(debug) }, quota);
     return apiSuccess({
       data: { directTrains },
       meta: trustMetaForTrainList(directTrains),

@@ -48,11 +48,7 @@ const providerCache = new ProviderCache({
 });
 
 const availabilityCache = new ProviderCache({
-  // Split-journey search needs to verify many (leg1, leg2) pairs inside one request's
-  // time budget. maxConcurrency: 2 was the bottleneck that made most 30-candidate
-  // split searches return only a handful of verified cards before the deadline hit —
-  // 6 gives ~3x throughput while staying well under what the provider rate-limits at.
-  maxConcurrency: 6,
+  maxConcurrency: 2,
   retryCount: 0,
   retryDelayMs: 1000,
   failureTtlMs: 0,
@@ -141,7 +137,7 @@ class APIQueue {
   }
 }
 
-const irctcQueue = new APIQueue(6, 150);
+const irctcQueue = new APIQueue(4, 200);
 const trainListQueue = new APIQueue(12, 40);
 let availabilityCooldownUntil = 0;
 let trainListCooldownUntil = 0;
@@ -370,40 +366,18 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
       )
     );
 
-    console.log('[live-check-debug] START', { trainNo, fromStn, toStn, date: dateStr, classType: normalizedClass, quota });
-
-    let response: any = await callWithRetry(doFetch, 2, 'availability');
+    let response: any = await callWithRetry(doFetch, 1, 'availability');
     let rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
     let fareObj = response?.data?.fare;
 
-    console.log('[live-check-debug] RESPONSE', {
-      trainNo, fromStn, toStn, date: dateStr, classType: normalizedClass,
-      success: response?.success,
-      rowCount: rows.length,
-      fare: fareObj,
-      firstRow: rows[0] ?? null,
-      error: response?.error ?? null,
-    });
-
     const hasNoFare = !fareObj || fareObj.totalFare === 0 || fareObj.Fare === 0 || fareObj.Amount === 0 || fareObj.total === 0;
 
-    // Retry once after a short pause if provider returned zero rows or undefined/0 fare.
-    // Kept short (was 2000ms) — split-journey search verifies 30+ legs inside one
-    // request's time budget, and a 2s blind sleep per empty response was enough on its
-    // own to exhaust that budget after only a handful of routes.
-    if ((rows.length === 0 || hasNoFare) && response?.success !== false) {
+    if (rows.length === 0 || hasNoFare) {
       console.log('[fare-retry]', trainNo, fromStn, toStn, dateStr, normalizedClass);
-      await new Promise((r) => setTimeout(r, 600));
-      response = await callWithRetry(doFetch, 2, 'availability');
+      await new Promise((r) => setTimeout(r, 2000));
+      response = await callWithRetry(doFetch, 1, 'availability');
       rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
       fareObj = response?.data?.fare;
-      console.log('[live-check-debug] RETRY RESPONSE', {
-        trainNo, fromStn, toStn, date: dateStr, classType: normalizedClass,
-        success: response?.success,
-        rowCount: rows.length,
-        fare: fareObj,
-        firstRow: rows[0] ?? null,
-      });
     }
 
     const finalHasNoFare = !fareObj || fareObj.totalFare === 0 || fareObj.Fare === 0 || fareObj.Amount === 0 || fareObj.total === 0;

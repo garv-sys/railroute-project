@@ -1219,7 +1219,7 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     for (const terminal of terminalClusterFor(stationCode)) {
       const terminalCoord = stationCoordinatesForRouting(terminal);
       if (!terminalCoord) continue;
-      if (haversineKm(coord, terminalCoord) <= 35) excluded.add(terminal);
+      if (haversineKm(coord, terminalCoord) <= 25) excluded.add(terminal);
     }
   };
 
@@ -1234,16 +1234,16 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
   }
 
   const directDistance = Math.max(1, haversineKm(sourceCoord, destCoord));
-  const latPadding = Math.max(2, Math.abs(sourceCoord.lat - destCoord.lat) * 0.2);
-  const lonPadding = Math.max(2, Math.abs(sourceCoord.lon - destCoord.lon) * 0.2);
+  const latPadding = Math.max(1.5, Math.abs(sourceCoord.lat - destCoord.lat) * 0.25);
+  const lonPadding = Math.max(1.5, Math.abs(sourceCoord.lon - destCoord.lon) * 0.25);
   const minLat = Math.min(sourceCoord.lat, destCoord.lat) - latPadding;
   const maxLat = Math.max(sourceCoord.lat, destCoord.lat) + latPadding;
   const minLon = Math.min(sourceCoord.lon, destCoord.lon) - lonPadding;
   const maxLon = Math.max(sourceCoord.lon, destCoord.lon) + lonPadding;
   const midpoint = { lat: (sourceCoord.lat + destCoord.lat) / 2, lon: (sourceCoord.lon + destCoord.lon) / 2 };
-  const minEndpointDistance = directDistance < 250 ? 35 : 80;
-  const nearbySourceHubs = nearbyMajorHubsForStation(normalizedSource);
-  const nearbyDestHubs = nearbyMajorHubsForStation(normalizedDest);
+  const minEndpointDistance = directDistance < 250 ? 25 : 50;
+  const nearbySourceHubs = nearbyMajorHubsForStation(normalizedSource, 15, 180);
+  const nearbyDestHubs = nearbyMajorHubsForStation(normalizedDest, 15, 180);
 
   const inCorridor = allHubs.filter((hub) => {
     const point = { lat: hub.lat, lon: hub.lon };
@@ -1251,15 +1251,15 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     if (!inBox) return false;
     if (haversineKm(sourceCoord, point) < minEndpointDistance) return false;
     if (haversineKm(destCoord, point) < minEndpointDistance) return false;
-    return haversineKm(midpoint, point) <= directDistance * 0.85;
+    return haversineKm(midpoint, point) <= directDistance * 1.4;
   });
 
-  const pool = inCorridor.length >= 12 ? inCorridor : allHubs;
+  const pool = inCorridor.length >= 8 ? inCorridor : allHubs;
   const sorted = pool.sort((a, b) => dynamicHubScore(sourceCoord, destCoord, a) - dynamicHubScore(sourceCoord, destCoord, b));
   const longDistancePriorityHubs = directDistance >= 400
     ? NATIONAL_LONG_DISTANCE_SPLIT_HUBS.filter((hub) => !excluded.has(hub))
     : [];
-  
+
   const candidates = Array.from(new Set([preferred, ...nearbySourceHubs, ...nearbyDestHubs, ...longDistancePriorityHubs, ...sorted.map((hub) => hub.code)].filter(Boolean)));
   const filteredCandidates = candidates.filter((hubCode) => {
     if (hubCode === preferred) return true;
@@ -1270,7 +1270,7 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     if (!hubCoord) return true;
     return isHubOnPath(sourceCoord, hubCoord, destCoord);
   });
-  
+
   const getHubScore = (code: string) => {
     if (code === preferred) return -Number.MAX_VALUE;
     const coord = stationCoordinatesForRouting(code);
@@ -1282,9 +1282,9 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     }
     return score;
   };
-  
+
   filteredCandidates.sort((a, b) => getHubScore(a) - getHubScore(b));
-  
+
   return takeForCoverage(filteredCandidates, limit);
 }
 
@@ -1341,19 +1341,20 @@ function hubLabel(code: string) {
 
 // Builds a date-specific availability row set. If the provider does not return
 // an exact date row, availability stays unavailable instead of being inferred.
-async function generate6DayAvailability(
-  trainNo: string,
-  source: string,
-  destination: string,
-  startDateStr: string,
-  classCode: string,
-  _trainType: string,
-  isMockTrain: boolean,
-  runningDays?: boolean[], // normalized [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
-  isPrimaryClass: boolean = false,
-  scheduleOnly: boolean = false,
-  debug: boolean = false
-): Promise<ClassAvailabilityItem[]> {
+  async function generate6DayAvailability(
+    trainNo: string,
+    source: string,
+    destination: string,
+    startDateStr: string,
+    classCode: string,
+    _trainType: string,
+    isMockTrain: boolean,
+    runningDays?: boolean[],
+    isPrimaryClass: boolean = false,
+    scheduleOnly: boolean = false,
+    debug: boolean = false,
+    quota: string = 'GN'
+  ): Promise<ClassAvailabilityItem[]> {
   let baseDate = new Date();
   if (startDateStr.includes('-')) {
     const parts = startDateStr.split('-');
@@ -1534,10 +1535,9 @@ async function generate6DayAvailability(
   }
 
   async function fetchAvailWithStationFallback(
-    tNo: string, src: string, dst: string, dateStr: string, cls: string
+    tNo: string, src: string, dst: string, dateStr: string, cls: string, quota: string = 'GN'
   ): Promise<any> {
-    const primary = await plannerTimeout(checkSeatAvailability(tNo, src, dst, dateStr, cls), 8000, null);
-    // If IRCTC rejects the station codes, resolve them from schedule and retry once
+    const primary = await plannerTimeout(checkSeatAvailability(tNo, src, dst, dateStr, cls, quota), 8000, null);
     const isStationError = (r: any) => {
       if (!r) return true;
       const err = String(r?.error || r?.data || '').toLowerCase();
@@ -1552,7 +1552,7 @@ async function generate6DayAvailability(
           const resolvedDst = await resolveScheduleStopCode(dst, route);
           if (resolvedSrc !== src || resolvedDst !== dst) {
             console.log(`[avail-fix] Retrying ${tNo} with corrected stops: ${src}->${resolvedSrc}, ${dst}->${resolvedDst}`);
-            const retry = await plannerTimeout(checkSeatAvailability(tNo, resolvedSrc, resolvedDst, dateStr, cls), 8000, null);
+            const retry = await plannerTimeout(checkSeatAvailability(tNo, resolvedSrc, resolvedDst, dateStr, cls, quota), 8000, null);
             if (retry && retry.success !== false) return retry;
           }
         }
@@ -1564,7 +1564,7 @@ async function generate6DayAvailability(
   }
 
   try {
-    const availData = await fetchAvailWithStationFallback(trainNo, source, destination, startDateStr, classCode);
+    const availData = await fetchAvailWithStationFallback(trainNo, source, destination, startDateStr, classCode, quota);
     const isDemoMode = false;
     if (!availData || availData.success === false) {
       const errorMsg = availData?.error || 'Provider check failed';
@@ -1895,7 +1895,7 @@ async function generate6DayAvailability(
 }
 
 // Enriches a train with provider availability and lightweight display metadata.
-export async function enrichWithLiveAvailability(train: any, date: string, classType: string, options: TrainSearchOptions = {}): Promise<TrainResult> {
+export async function enrichWithLiveAvailability(train: any, date: string, classType: string, options: TrainSearchOptions = {}, quota: string = 'GN'): Promise<TrainResult> {
   const trainNo = train.trainNo || train.train_no || train.train_number || train.trainno || train.trainNumber;
   const source = train.trainSource || train.train_src || train.from_stn_code || train.from_station_code || train.fromStnCode || train.source;
   const destination = train.trainDestination || train.train_dstn || train.destination || train.to_stn_code || train.to_station_code || train.toStnCode || train.dest;
@@ -1971,7 +1971,7 @@ export async function enrichWithLiveAvailability(train: any, date: string, class
       destination,
       date: formattedDate,
       classType: initialClassForProof,
-      quota: 'GN',
+      quota,
     }),
   };
   const isCityTerminalOption = requestedSource !== providerSource || requestedDestination !== providerDestination;
@@ -2042,10 +2042,11 @@ export async function enrichWithLiveAvailability(train: any, date: string, class
       cls,
       baseResult.trainType || "",
       isMockTrain,
-      baseResult.runsOnDays, // pass actual schedule so off-days show "Not Running"
+      baseResult.runsOnDays,
       true,
       options.fetchLive === false,
-      Boolean(options.debug)
+      Boolean(options.debug),
+      quota
     );
   }));
 
@@ -2288,7 +2289,7 @@ export async function searchTrainsSmart(source: string, dest: string, date: stri
     return trains;
 }
 
-export async function checkDirectTrains(source: string, dest: string, date: string, classType: string = 'Any', options: TrainSearchOptions = {}): Promise<TrainResult[]> {
+export async function checkDirectTrains(source: string, dest: string, date: string, classType: string = 'Any', options: TrainSearchOptions = {}, quota: string = 'GN'): Promise<TrainResult[]> {
   source = normalizeStationCode(source);
   dest = normalizeStationCode(dest);
   
@@ -2322,7 +2323,7 @@ export async function checkDirectTrains(source: string, dest: string, date: stri
       return enrichWithLiveAvailability(train, formattedDate, classType, {
         ...options,
         fetchLive: shouldFetchLive,
-      });
+      }, quota);
     }));
 
     let validEnrichedTrains = enrichedTrains
@@ -2539,617 +2540,314 @@ async function isDirectTrainEver(trainNo: string, source: string, dest: string):
 }
 
 
-export async function findSmartRoutes(source: string, dest: string, date: string, classType: string = 'Any', directTrains: any[] = [], preferredHubInput: string = '', options: TrainSearchOptions = {}): Promise<SplitRouteResult[]> {
-  const startSmartTime = Date.now();
+// ---------------------------------------------------------------------------
+// generateSplitCandidates — Phase 1 of the lazy-loading split search.
+// Returns up to `limit` raw (un-enriched) candidates using ALL stations
+// in the railway graph as potential hubs via dynamicSplitHubCandidates().
+// No live fare / availability APIs are called here.
+// ---------------------------------------------------------------------------
+export interface SplitCandidate {
+  hub: string;
+  hubName: string;
+  t1: any;  // raw provider train object for leg 1
+  t2: any;  // raw provider train object for leg 2
+  score: number;
+  estimatedLayoverHours?: number;
+}
+
+export async function generateSplitCandidates(
+  source: string,
+  dest: string,
+  date: string,
+  options: TrainSearchOptions = {},
+  limit = 15,
+): Promise<SplitCandidate[]> {
   source = normalizeStationCode(source);
   dest = normalizeStationCode(dest);
   const formattedDate = formatDateStr(date);
+  const startTime = Date.now();
+  const timeout = (options.globalTimeoutMs || 20000) - 3000; // leave 3 s for caller
 
-  const directTrainNos = new Set<string>();
-  const directTrainNames = new Set<string>();
+  // Use the existing intelligent hub discovery — covers ALL stations in the graph
+  const hubs = dynamicSplitHubCandidates(source, dest, '', 50).filter(
+    (h) => h !== source && h !== dest,
+  );
 
-  if (directTrains && directTrains.length > 0) {
-    directTrains.forEach((t) => {
-      const num = cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno);
-      if (num) directTrainNos.add(num);
-      const name = String(t.trainName || t.train_name || t.name || '').trim().toLowerCase();
-      if (name) directTrainNames.add(name);
-    });
-  } else {
-    try {
-      const rawDirect = await searchTrainsSmart(source, dest, formattedDate, { ...options, fetchLive: false });
-      rawDirect.forEach((t: any) => {
-        const num = cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno);
-        if (num) directTrainNos.add(num);
-        const name = String(t.trainName || t.train_name || t.name || '').trim().toLowerCase();
-        if (name) directTrainNames.add(name);
-      });
-      console.log(`[Smart Routing] Loaded ${directTrainNos.size} direct trains directly in backend for filtering.`);
-    } catch (e) {
-      console.warn("[Smart Routing] Failed to fetch direct trains in backend for filtering:", e);
-    }
-  }
-
-  const preferredHub = normalizeStationCode(preferredHubInput);
-  const hasPreferredHub = Boolean(preferredHub && preferredHub !== source && preferredHub !== dest);
-  const splitHubLimit = quickLimit(options, options.maxSplitHubs, hasPreferredHub ? 15 : 12);
-  const splitLegLimit = quickLimit(options, options.maxSplitLegOptions, 40);
-  const splitCandidateLimit = quickLimit(options, options.maxSplitCandidates, 400);
-  const splitResultLimit = quickLimit(options, options.maxSplitResults, isFullCoverage(options) ? 120 : 15);
-  const quickPotentialLimit = isFullCoverage(options)
-    ? splitCandidateLimit
-    : Math.min(splitCandidateLimit, Math.max(60, splitResultLimit * 4));
-  // Keep leg searches cheap: 1 pair per hub leg so we don't blow up the rate limit.
-  // Hub-cluster matching below handles the alias problem instead.
-  const legSearchOptions: TrainSearchOptions = {
+  const legOpts: TrainSearchOptions = {
     ...options,
-    providerPairLimit: 1,
+    fetchLive: false,
+    providerPairLimit: 2,
+    plannerLegTimeoutMs: 3500,
+    maxSplitCandidates: 50,
   };
 
-  const prioritizePreferredHub = (hubs: string[]) => {
-    const next = hasPreferredHub ? [preferredHub, ...hubs] : hubs;
-    return Array.from(new Set(next)).filter((hub) => hub && hub !== source && hub !== dest);
-  };
+  const candidates: SplitCandidate[] = [];
+  const seen = new Set<string>();
 
-  try {
-    const formattedDate = formatDateStr(date);
-    let hubsToTry = dynamicSplitHubCandidates(source, dest, preferredHub, splitHubLimit);
-
-    // Dynamic hub extraction skipped in quick mode — getTrainSchedule adds latency per train.
-    // Hub candidates from dynamicSplitHubCandidates() already cover the route corridor.
-    hubsToTry = takeForCoverage(expandSplitHubAliases(prioritizePreferredHub(hubsToTry)), splitHubLimit);
-
-    // SMALL STATION PRE-RESOLUTION: Only for non-major-hub stations that IRCTC
-    // doesn't recognize as a valid search origin/destination.
-    // Major hubs (PNBE, NDLS, HWH, DDU, etc.) always search as themselves.
-    let effectiveSource = source;
-    let effectiveDest = dest;
-
-    const sourceIsMajorHub = MAJOR_HUB_BY_CODE.has(source);
-    const destIsMajorHub = MAJOR_HUB_BY_CODE.has(dest);
-
-    if (!sourceIsMajorHub || !destIsMajorHub) {
-      const probeHub = hubsToTry[0] || 'NDLS';
-      const [probeL1, probeL2] = await Promise.all([
-        !sourceIsMajorHub
-          ? plannerTimeout(searchTrainsSmart(source, probeHub, formattedDate, { ...legSearchOptions, providerPairLimit: 1 }), 2500, [])
-          : Promise.resolve([1]), // major hub — skip probe, treat as found
-        !destIsMajorHub
-          ? plannerTimeout(searchTrainsSmart(probeHub, dest, formattedDate, { ...legSearchOptions, providerPairLimit: 1 }), 2500, [])
-          : Promise.resolve([1]), // major hub — skip probe, treat as found
+  for (const hub of hubs) {
+    if (Date.now() - startTime > timeout) break;
+    if (candidates.length >= limit * 4) break; // gather extras for scoring, prune later
+    try {
+      const [l1, l2] = await Promise.all([
+        searchTrainsSmart(source, hub, formattedDate, legOpts),
+        searchTrainsSmart(hub, dest, formattedDate, legOpts),
       ]);
+      if (!l1.length || !l2.length) continue;
 
-      if (!sourceIsMajorHub && probeL1.length === 0) {
-        const nearbySourceHubs = nearbyMajorHubsForStation(source, 15, 150)
-          .filter(h => h !== probeHub && h !== dest);
-        for (const altSrc of nearbySourceHubs.slice(0, 2)) {
-          const altProbe = await plannerTimeout(
-            searchTrainsSmart(altSrc, probeHub, formattedDate, { ...legSearchOptions, providerPairLimit: 1 }),
-            2000, []
-          );
-          if (altProbe.length > 0) {
-            console.log(`[smart-search] Small station: resolved ${source} → ${altSrc}`);
-            effectiveSource = altSrc;
-            break;
-          }
-        }
-      }
+      for (const t1 of l1.slice(0, 6)) {
+        for (const t2 of l2.slice(0, 6)) {
+          const tn1 = (t1.trainNo || t1.train_no || '').toString().replace(/\D/g, '');
+          const tn2 = (t2.trainNo || t2.train_no || '').toString().replace(/\D/g, '');
+          if (tn1 && tn2 && tn1 === tn2) continue; // same train — skip
+          const key = `${tn1}_${hub}_${tn2}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
 
-      if (!destIsMajorHub && probeL2.length === 0) {
-        const nearbyDestHubs = nearbyMajorHubsForStation(dest, 15, 150)
-          .filter(h => h !== probeHub && h !== source && h !== effectiveSource);
-        for (const altDst of nearbyDestHubs.slice(0, 2)) {
-          const altProbe = await plannerTimeout(
-            searchTrainsSmart(probeHub, altDst, formattedDate, { ...legSearchOptions, providerPairLimit: 1 }),
-            2000, []
-          );
-          if (altProbe.length > 0) {
-            console.log(`[smart-search] Small station: resolved ${dest} → ${altDst}`);
-            effectiveDest = altDst;
-            break;
-          }
-        }
-      }
-    }
-
-    let potentialRoutes: any[] = [];
-    const enoughQuickPotential = () => {
-      if (isFullCoverage(options)) return false;
-      const uniqueHubs = new Set(potentialRoutes.map((route) => route.hub)).size;
-      // Require at least 120 candidates and 5 unique hubs before stopping early
-      return potentialRoutes.length >= Math.min(120, quickPotentialLimit) && uniqueHubs >= 5;
-    };
-
-
-    // Check hubs in bounded parallel batches. Train-list calls are cached and
-    // cheaper than availability calls, so this keeps broad routes responsive.
-    const splitHubBatchSize = isFullCoverage(options) ? 6 : 3;
-    for (let i = 0; i < hubsToTry.length; i += splitHubBatchSize) {
-      if (Date.now() - startSmartTime > (options.globalTimeoutMs || 10000)) {
-        console.warn(`[smart-search] Hub search exceeded global timeout. Returning ${potentialRoutes.length} potential routes.`);
-        break;
-      }
-      if (!isFullCoverage(options) && (potentialRoutes.length >= quickPotentialLimit || enoughQuickPotential())) break;
-      if (i > 0) {
-        await providerPaceDelay(options.liveLookupDelayMs ?? 50);
-      }
-      const batch = hubsToTry.slice(i, i + splitHubBatchSize);
-      await Promise.all(batch.map(async (hub) => {
-        if (hub === source || hub === dest) return;
-        if (!isFullCoverage(options) && potentialRoutes.length >= quickPotentialLimit) return;
-        
-        try {
-	          const secondLegDates = [
-	            formattedDate,
-	            addDaysToRailDate(formattedDate, 1),
-	            ...(isFullCoverage(options) ? [addDaysToRailDate(formattedDate, 2)] : []),
-	          ];
-	          const [l1Trains, ...l2TrainGroups] = await plannerTimeout(
-	            Promise.all([
-	              searchTrainsSmart(effectiveSource, hub, formattedDate, legSearchOptions),
-	              ...secondLegDates.map((legDate) => searchTrainsSmart(hub, effectiveDest, legDate, legSearchOptions))
-	            ]),
-	            options.plannerLegTimeoutMs,
-	            [[], ...secondLegDates.map(() => [])] as any[][]
-	          );
-	          const l2Trains = l2TrainGroups.flat();
-
-            // Filter out trains already known to be direct (from directTrainNos set built above).
-            // isDirectTrainEver() is skipped here — it fires getTrainSchedule per train (too slow).
-            const filteredL1 = l1Trains.filter((t: any) => !directTrainNos.has(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
-            const filteredL2 = l2Trains.filter((t: any) => !directTrainNos.has(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
-
-          const sortLogic = (a: any, b: any) => {
-            const aDaily = a.running_days === '1111111' ? 1 : 0;
-            const bDaily = b.running_days === '1111111' ? 1 : 0;
-            if (bDaily !== aDaily) return bDaily - aDaily;
-            const aSpecial = (a.train_name || '').includes('SPL') ? 1 : 0;
-            const bSpecial = (b.train_name || '').includes('SPL') ? 1 : 0;
-            return aSpecial - bSpecial;
-          };
-
-          if (filteredL1.length > 0 && filteredL2.length > 0) {
-            filteredL1.sort(sortLogic);
-            filteredL2.sort(sortLogic);
-
-            let routesForHub = 0;
-            const maxRoutesPerHub = isFullCoverage(options) ? 100 : 15;
-
-            // Explore the provider grid until quick mode has enough route shapes.
-            routeGrid:
-            for (const t1 of takeForCoverage(filteredL1, splitLegLimit)) {
-              for (const t2 of takeForCoverage(filteredL2, splitLegLimit)) {
-                const trainNo1 = String(t1.trainNo || t1.train_no || t1.train_number || t1.trainno || '').trim();
-                const trainNo2 = String(t2.trainNo || t2.train_no || t2.train_number || t2.trainno || '').trim();
-                const cleanT1 = cleanTrainNo(trainNo1);
-                const cleanT2 = cleanTrainNo(trainNo2);
-                if (cleanT1 && cleanT2 && cleanT1 === cleanT2) continue;
-                if (directTrainNos.has(cleanT1) || directTrainNos.has(cleanT2)) continue;
-
-                const name1 = String(t1.trainName || t1.train_name || t1.name || '').trim().toLowerCase();
-                const name2 = String(t2.trainName || t2.train_name || t2.name || '').trim().toLowerCase();
-                if (name1 && name2 && name1 === name2) continue;
-                if (directTrainNames.has(name1) || directTrainNames.has(name2)) continue;
-
-                const arrTimeStr = t1.to_time || t1.to_sta || t1.arrivalTime;
-                const depTimeStr = t2.from_time || t2.from_std || t2.departureTime;
-
-                const destCode1 = normalizeStationCode(t1.to_stn_code || t1.to_station_code || t1.toStnCode || t1.train_dstn || t1.dest || '');
-                const srcCode2 = normalizeStationCode(t2.from_stn_code || t2.from_station_code || t2.fromStnCode || t2.train_src || t2.source || '');
-
-                if (!arrTimeStr || !depTimeStr) continue;
-                // Validate hub connection only when both codes are known.
-                // If either is empty (IRCTC didn't return the field) fall through optimistically.
-                if (destCode1 && srcCode2) {
-                  const hubCluster = sameAreaTerminalClusterFor(hub, 60);
-                  const dest1InHub = destCode1 === hub || hubCluster.includes(destCode1);
-                  const src2InHub = srcCode2 === hub || hubCluster.includes(srcCode2);
-                  if (!dest1InHub || !src2InHub) continue;
-                }
-
-                  const requestedSplitClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
-                  if (requestedSplitClass) {
-                    if (!legSupportsRequestedClass(t1, requestedSplitClass) || !legSupportsRequestedClass(t2, requestedSplitClass)) {
-                      continue;
-                    }
-                  }
-
-	                const leg1Date = formatDateStr(t1._journeyDate || formattedDate);
-	                const candidateLeg2Date = formatDateStr(t2._journeyDate || formattedDate);
-	                const leg1Timing = actualTrainTiming(t1, leg1Date);
-	                const leg2Timing = actualTrainTiming(t2, candidateLeg2Date);
-	                const arrivalMs = leg1Timing.arrivalMs;
-	                let depMs = leg2Timing.departureMs;
-
-	                while (depMs < arrivalMs) {
-	                  depMs += 24 * 60 * 60 * 1000;
-	                }
-	                const resolvedLeg2Date = formatRailDate(new Date(depMs));
-
-	                const layoverHours = (depMs - arrivalMs) / (1000 * 60 * 60);
-	                // Heritage/mountain routes (short leg 2) can have longer layovers at a hub
-	                const isHeritageLeg2 = !!(t2._isHeritage);
-	                const isMajorHub = isKnownMajorHub(hub);
-	                const maxLayover = hub === preferredHub
-	                  ? 18.0
-	                  : isMajorHub
-	                    ? 18.0
-	                    : isHeritageLeg2
-	                      ? 8.0
-	                      : 6.0;
-
-                // LAYOVER WINDOW: 45m (0.75h) to maxLayover for optimal transition
-                if (layoverHours >= 0.75 && layoverHours <= maxLayover) {
-                  let layoverScoreAdjust = 0;
-                  if (layoverHours >= 0.75 && layoverHours <= 3.0) {
-                    layoverScoreAdjust += 30; // prefer 45m to 3h
-                  } else if (layoverHours > 8.0) {
-                    layoverScoreAdjust -= 30; // penalize over 8h
-                  }
-
-                  potentialRoutes.push({
-                    hub,
-	                    t1,
-	                    t2,
-	                    leg1Date,
-	                    leg2Date: resolvedLeg2Date,
-	                    leg1DepartureDate: leg1Timing.departureDate,
-	                    leg1ArrivalDate: leg1Timing.arrivalDate,
-	                    leg2DepartureDate: railDateToIso(resolvedLeg2Date),
-	                    layoverHours,
-	                    layoverDuration: formatDuration(depMs - arrivalMs),
-	                    score: 100 - (layoverHours * 4) + layoverScoreAdjust + (hub === preferredHub ? 45 : 0) + (isMajorHub ? 10 : 0) + trainServiceQualityBoost(t1) + trainServiceQualityBoost(t2),
-	                    _isHeritage: isHeritageLeg2
-                  });
-                  routesForHub++;
-                  if (routesForHub >= maxRoutesPerHub) {
-                    break routeGrid;
-                  }
-                  if (!isFullCoverage(options) && potentialRoutes.length >= quickPotentialLimit) {
-                    break routeGrid;
-                  }
-                }
-              }
+          // Rough layover estimate
+          const dep1 = rawTrainDeparture(t1) || '';
+          const arr1 = rawTrainArrival(t1) || '';
+          const dep2 = rawTrainDeparture(t2) || '';
+          let estimatedLayoverHours: number | undefined;
+          if (arr1 && dep2) {
+            try {
+              let a1Ms = parseTime(arr1, formattedDate).getTime();
+              let d2Ms = parseTime(dep2, formattedDate).getTime();
+              while (d2Ms < a1Ms) d2Ms += 86400000;
+              estimatedLayoverHours = (d2Ms - a1Ms) / 3600000;
+              if (estimatedLayoverHours < 0 || estimatedLayoverHours > 24) continue;
+            } catch {
+              // ignore timing parse errors
             }
           }
-        } catch {
-          console.warn(`[Smart Routing] Skipped hub ${hub} due to missing data.`);
-        }
-      }));
-    }
 
-    // Sort all gathered potential routes
-    potentialRoutes.sort((a, b) => b.score - a.score);
-    potentialRoutes = takeForCoverage(potentialRoutes, splitCandidateLimit);
-
-    const validRoutes: SplitRouteResult[] = [];
-    
-    const parseDurationMins = (dur: string) => {
-      if (!dur || dur === 'N/A') return 0;
-      let hours = 0, mins = 0;
-      if (dur.includes(':')) {
-        const parts = dur.replace('hrs', '').trim().split(':');
-        hours = parseInt(parts[0]) || 0;
-        mins = parseInt(parts[1]) || 0;
-      } else if (dur.includes('h')) {
-        const hMatch = dur.match(/(\d+)h/);
-        const mMatch = dur.match(/(\d+)m/);
-        if (hMatch) hours = parseInt(hMatch[1]);
-        if (mMatch) mins = parseInt(mMatch[1]);
-      }
-      return (hours * 60) + mins;
-    };
-
-    const getSeatScore = (status: string) => {
-      const s = status.toUpperCase();
-      if (s.includes('AVAILABLE') || s.includes('CURR_AV') || /\bAVL\b/.test(s)) return +35;
-      if (s.includes('RAC')) return +15;
-      if (s.includes('WL')) return -10;
-      if (s.includes('REGRET')) return -45;
-      if (s.includes('UNAVAILABLE') || s.includes('NOT RETURNED')) return -60;
-      return -20;
-    };
-
-    const requireVerifiedLiveSplit = false;
-
-    // Process route candidates in parallel batches to speed up
-    const candidateBatchSize = isFullCoverage(options) ? 6 : 12;
-    for (let idx = 0; idx < potentialRoutes.length; idx += candidateBatchSize) {
-      if (validRoutes.length >= splitResultLimit) break;
-      const batch = potentialRoutes.slice(idx, idx + candidateBatchSize);
-      
-      const elapsed = Date.now() - startSmartTime;
-      const timeoutLimit = options.globalTimeoutMs || 10000;
-      const isRunningLowOnTime = elapsed > (timeoutLimit - 3000);
-      if (elapsed > timeoutLimit) {
-        console.warn(`[smart-search] Verification exceeded global timeout (${elapsed}ms > ${timeoutLimit}ms). Filling remaining ${splitResultLimit - validRoutes.length} slots statically.`);
-        const remainingCandidates = potentialRoutes.slice(idx);
-        const staticResults = await Promise.all(remainingCandidates.map(async (route) => {
-          try {
-            const leg1Date = route.leg1Date || formattedDate;
-            const leg2Date = route.leg2Date || formattedDate;
-            
-            const [leg1Enriched, leg2Enriched] = await Promise.all([
-              enrichWithLiveAvailability(
-                { ...route.t1, _journeyDate: leg1Date },
-                leg1Date,
-                classType,
-                { ...options, fetchLive: false }
-              ),
-              enrichWithLiveAvailability(
-                { ...route.t2, _journeyDate: leg2Date },
-                leg2Date,
-                classType,
-                { ...options, fetchLive: false }
-              )
-            ]);
-            
-            const f1 = safeParseFare(leg1Enriched.fare);
-            const f2 = safeParseFare(leg2Enriched.fare);
-            const totalFare = f1 > 0 && f2 > 0 ? f1 + f2 : 0;
-            
-            const res: SplitRouteResult = {
-              hubStation: route.hub,
-              hubStationName: hubLabel(route.hub),
-              layoverDuration: route.layoverDuration,
-              layoverHours: route.layoverHours,
-              leg1Date: railDateToIso(leg1Date),
-              leg2Date: railDateToIso(leg2Date),
-              leg1DepartureDate: route.leg1DepartureDate,
-              leg1ArrivalDate: route.leg1ArrivalDate,
-              leg2DepartureDate: route.leg2DepartureDate,
-              leg1Fare: f1,
-              leg2Fare: f2,
-              totalFare,
-              score: 50,
-              leg1: leg1Enriched,
-              leg2: leg2Enriched,
-              combinedConfirmationChance: null,
-              isHeritage: !!(route._isHeritage)
-            };
-            return res;
-          } catch {
-            return null;
+          // Scoring: prefer shorter layovers, daily trains, no specials
+          let score = 50;
+          if (estimatedLayoverHours !== undefined) {
+            score -= Math.abs(estimatedLayoverHours - 1.5) * 3; // sweet spot ~1.5 h
           }
-        }));
-        
-        for (const res of staticResults) {
-          if (res) {
-            validRoutes.push(res);
-          }
-        }
-        break;
-      }
-      
-      const batchResults = await Promise.all(batch.map(async (route) => {
-        try {
-          const leg1Date = route.leg1Date || formattedDate;
-          const leg2Date = route.leg2Date || formattedDate;
+          if ((t1.running_days || '') === '1111111') score += 10;
+          if ((t2.running_days || '') === '1111111') score += 10;
+          if (/SPL|SPECIAL/i.test(t1.train_name || '')) score -= 8;
+          if (/SPL|SPECIAL/i.test(t2.train_name || '')) score -= 8;
+          // Depart early so user has time at hub
+          if (dep1 && dep1 < '12:00') score += 5;
 
-          // Always use static enrichment (no live IRCTC calls) for split legs.
-          // Live availability for split routes is checked on-demand via UI tap.
-          // This keeps the split search fast and prevents timeout-caused empty results.
-          const staticOptions = { ...options, fetchLive: false };
-          const [leg1Enriched, leg2Enriched] = await Promise.all([
-            enrichWithLiveAvailability(
-              { ...route.t1, _journeyDate: leg1Date },
-              leg1Date,
-              classType,
-              staticOptions
-            ),
-            enrichWithLiveAvailability(
-              { ...route.t2, _journeyDate: leg2Date },
-              leg2Date,
-              classType,
-              staticOptions
-            )
-          ]);
-
-          const cleanClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
-
-          // Class filter: if a specific class was requested and train explicitly
-          // doesn't support it, skip. Otherwise include the route.
-          if (cleanClass) {
-            const leg1HasClasses = leg1Enriched.classes && leg1Enriched.classes.length > 0;
-            const leg2HasClasses = leg2Enriched.classes && leg2Enriched.classes.length > 0;
-            if (leg1HasClasses && !leg1Enriched.classes!.includes(cleanClass)) return null;
-            if (leg2HasClasses && !leg2Enriched.classes!.includes(cleanClass)) return null;
-          }
-          const leg1Verified = requireVerifiedLiveSplit ? pruneToVerifiedLiveClasses(leg1Enriched) : leg1Enriched;
-          const leg2Verified = requireVerifiedLiveSplit ? pruneToVerifiedLiveClasses(leg2Enriched) : leg2Enriched;
-
-          const a1 = leg1Verified.availability.toLowerCase();
-          const a2 = leg2Verified.availability.toLowerCase();
-          
-          if (
-            a1.includes('not available for booking') || a1.includes('cancel') || a1.includes('not running') || a1.includes('no service') ||
-            a2.includes('not available for booking') || a2.includes('cancel') || a2.includes('not running') || a2.includes('no service')
-          ) {
-            return null;
-          }
-          const selectedClassUnavailable =
-            selectedClassMissing(leg1Verified, classType) || selectedClassMissing(leg2Verified, classType);
-
-          const f1 = safeParseFare(leg1Verified.fare);
-          const f2 = safeParseFare(leg2Verified.fare);
-          const totalFare = f1 > 0 && f2 > 0 ? f1 + f2 : 0;
-
-          const predictionValues = [leg1Verified.confirmationChance, leg2Verified.confirmationChance]
-            .filter((value): value is number => typeof value === 'number' && value > 0);
-          const combinedConfirmationChance = predictionValues.length === 2
-            ? Math.round((predictionValues[0] * predictionValues[1]) / 100)
-            : null;
-
-          let optimizedScore = 100;
-          optimizedScore += getSeatScore(leg1Verified.availability);
-          optimizedScore += getSeatScore(leg2Verified.availability);
-          if (selectedClassUnavailable) {
-            optimizedScore -= 25;
-          }
-          
-          const isMajorHub = isKnownMajorHub(route.hub);
-          if (isMajorHub) {
-            optimizedScore += 10;
-          }
-          if (route.layoverHours > 3.0) {
-            optimizedScore -= (route.layoverHours - 3.0) * (isMajorHub ? 5 : 10);
-          } else if (route.layoverHours < 1.5) {
-            optimizedScore -= (1.5 - route.layoverHours) * 8;
-          } else {
-            optimizedScore += 5;
-          }
-
-          const leg1Mins = parseDurationMins(leg1Verified.duration);
-          const leg2Mins = parseDurationMins(leg2Verified.duration);
-          const totalHours = (leg1Mins + leg2Mins) / 60 + route.layoverHours;
-          optimizedScore -= totalHours * 1.2;
-
-          optimizedScore = Math.max(0, Math.min(100, Math.round(optimizedScore)));
-
-          const res: SplitRouteResult = {
-            hubStation: route.hub,
-            hubStationName: hubLabel(route.hub),
-            layoverDuration: route.layoverDuration,
-            layoverHours: route.layoverHours,
-            leg1Date: railDateToIso(leg1Date),
-            leg2Date: railDateToIso(leg2Date),
-            leg1DepartureDate: route.leg1DepartureDate,
-            leg1ArrivalDate: route.leg1ArrivalDate,
-            leg2DepartureDate: route.leg2DepartureDate,
-            leg1Fare: f1,
-            leg2Fare: f2,
-            totalFare,
-            score: optimizedScore,
-            leg1: leg1Verified,
-            leg2: leg2Verified,
-            combinedConfirmationChance,
-            isHeritage: !!(route._isHeritage)
-          };
-          return res;
-        } catch (e) {
-          console.warn(`[Smart Routing] Failed to enrich availability for route via ${route.hub}:`, e);
-          return null;
-        }
-      }));
-      
-      for (const res of batchResults) {
-        if (res) {
-          validRoutes.push(res);
+          candidates.push({
+            hub,
+            hubName: hubLabel(hub),
+            t1: { ...t1, _journeyDate: formattedDate },
+            t2: { ...t2, _journeyDate: formattedDate },
+            score,
+            estimatedLayoverHours,
+          });
         }
       }
+    } catch (e) {
+      console.warn(`[generateSplitCandidates] hub ${hub} failed:`, e);
     }
-
-    const usedCombinations = new Set<string>();
-    const finalDiverseRoutes: SplitRouteResult[] = [];
-    const hubUsageCount = new Map<string, number>();
-    const trainUsageCount = new Map<string, number>();
-
-    const sortedValid = validRoutes.sort((a, b) => b.score - a.score);
-
-    const routeCombinationKey = (route: SplitRouteResult) => {
-      const t1 = cleanTrainNo(route.leg1?.trainNo || '');
-      const t2 = cleanTrainNo(route.leg2?.trainNo || '');
-      return [t1, t2].sort().join('|');
-    };
-
-    const transferMinutes = (route: SplitRouteResult) => Math.round(route.layoverHours * 60);
-
-    const hasAcceptableTransfer = (route: SplitRouteResult) => {
-      const mins = transferMinutes(route);
-      return mins >= 30 && mins <= 480;
-    };
-
-    const rankScore = (route: SplitRouteResult) => {
-      let score = route.score || 50;
-
-      const mins = transferMinutes(route);
-      if (mins < 30) score -= 200;
-      else if (mins < 45) score -= 50;
-      else if (mins <= 180) score += 15;
-      else if (mins <= 360) score -= (mins - 180) / 60 * 8;
-      else score -= 120;
-
-      const leg1Mins = parseDurationMins(route.leg1.duration || '');
-      const leg2Mins = parseDurationMins(route.leg2.duration || '');
-      const totalHours = (leg1Mins + leg2Mins) / 60 + route.layoverHours;
-      score -= totalHours * 1.5;
-
-      if (route.totalFare > 0) {
-        score += Math.max(0, 40 - route.totalFare / 80);
-      }
-
-      const combo = routeCombinationKey(route);
-      const existingUses = trainUsageCount.get(combo) || 0;
-      score -= existingUses * 20;
-
-      const t1 = cleanTrainNo(route.leg1?.trainNo || '');
-      const t2 = cleanTrainNo(route.leg2?.trainNo || '');
-      if (t1) score -= (trainUsageCount.get(t1) || 0) * 8;
-      if (t2) score -= (trainUsageCount.get(t2) || 0) * 8;
-
-      return Math.max(0, Math.min(100, Math.round(score)));
-    };
-
-    const canAddRoute = (route: SplitRouteResult, hubMax: number = 3, trainMax: number = 3) => {
-      if (finalDiverseRoutes.length >= splitResultLimit) return false;
-      if (!hasAcceptableTransfer(route)) return false;
-
-      const combo = routeCombinationKey(route);
-      if (usedCombinations.has(combo)) return false;
-
-      const hub = hubGroupForDiversity(route.hubStation);
-      if ((hubUsageCount.get(hub) || 0) >= hubMax) return false;
-
-      const t1 = cleanTrainNo(route.leg1?.trainNo || '');
-      const t2 = cleanTrainNo(route.leg2?.trainNo || '');
-      if (t1 && (trainUsageCount.get(t1) || 0) >= trainMax) return false;
-      if (t2 && (trainUsageCount.get(t2) || 0) >= trainMax) return false;
-
-      return true;
-    };
-
-    const addRoute = (route: SplitRouteResult, hubMax: number = 3, trainMax: number = 3) => {
-      if (!canAddRoute(route, hubMax, trainMax)) return false;
-
-      const combo = routeCombinationKey(route);
-      const hub = hubGroupForDiversity(route.hubStation);
-      const t1 = cleanTrainNo(route.leg1?.trainNo || '');
-      const t2 = cleanTrainNo(route.leg2?.trainNo || '');
-
-      usedCombinations.add(combo);
-      hubUsageCount.set(hub, (hubUsageCount.get(hub) || 0) + 1);
-      if (t1) trainUsageCount.set(t1, (trainUsageCount.get(t1) || 0) + 1);
-      if (t2) trainUsageCount.set(t2, (trainUsageCount.get(t2) || 0) + 1);
-
-      const enriched = { ...route, score: rankScore(route) };
-      finalDiverseRoutes.push(enriched);
-      return true;
-    };
-
-    const rankedRoutes = validRoutes
-      .filter(hasAcceptableTransfer)
-      .map(route => ({ route, score: rankScore(route) }))
-      .sort((a, b) => b.score - a.score);
-
-    for (const { route } of rankedRoutes) {
-      if (finalDiverseRoutes.length >= splitResultLimit) break;
-      addRoute(route, 3, 3);
-    }
-
-    if (finalDiverseRoutes.length < splitResultLimit) {
-      for (const route of sortedValid) {
-        if (finalDiverseRoutes.length >= splitResultLimit) break;
-        if (finalDiverseRoutes.some(r => routeCombinationKey(r) === routeCombinationKey(route))) continue;
-        if (!hasAcceptableTransfer(route)) continue;
-        addRoute(route, 5, 5);
-      }
-    }
-
-    return finalDiverseRoutes;
-  } catch (error: any) {
-    console.error('Error finding smart routes:', error);
-    return [];
   }
+
+  // Diversity filter: limit same-hub to 3 and same-train to 5
+  const hubCounts = new Map<string, number>();
+  const trainCounts = new Map<string, number>();
+  const diverse: SplitCandidate[] = [];
+
+  candidates.sort((a, b) => b.score - a.score);
+  for (const c of candidates) {
+    if (diverse.length >= limit) break;
+    const tn1 = (c.t1.trainNo || c.t1.train_no || '').toString().replace(/\D/g, '');
+    const tn2 = (c.t2.trainNo || c.t2.train_no || '').toString().replace(/\D/g, '');
+    const hubCount = hubCounts.get(c.hub) || 0;
+    const t1Count = trainCounts.get(tn1) || 0;
+    const t2Count = trainCounts.get(tn2) || 0;
+    if (hubCount >= 3) continue;
+    if (t1Count >= 5 && t2Count >= 5) continue;
+    diverse.push(c);
+    hubCounts.set(c.hub, hubCount + 1);
+    trainCounts.set(tn1, t1Count + 1);
+    trainCounts.set(tn2, t2Count + 1);
+  }
+
+  console.log(`[generateSplitCandidates] ${source}→${dest}: ${diverse.length} candidates (from ${candidates.length} raw)`);
+  return diverse;
+}
+
+// ---------------------------------------------------------------------------
+// enrichSplitCandidates — Phase 2: take raw candidates and fetch live data.
+// Processes exactly the requested candidates (a batch slice from the queue).
+// Returns enriched SplitRouteResult[] for successful ones; skips failures.
+// ---------------------------------------------------------------------------
+export async function enrichSplitCandidates(
+  rawCandidates: SplitCandidate[],
+  date: string,
+  classType: string,
+  quota: string = 'GN',
+  options: TrainSearchOptions = {},
+): Promise<SplitRouteResult[]> {
+  const formattedDate = formatDateStr(date);
+  const results: SplitRouteResult[] = [];
+
+  const safeParseFare = (v: unknown) => Number(String(v || '').replace(/[^\d.]/g, '')) || 0;
+
+  for (const cand of rawCandidates) {
+    try {
+      const liveOpts: TrainSearchOptions = { ...options, fetchLive: true, fetchAllClasses: false, debug: false };
+      const [e1, e2] = await Promise.all([
+        enrichWithLiveAvailability({ ...cand.t1 }, formattedDate, classType, liveOpts, quota),
+        enrichWithLiveAvailability({ ...cand.t2 }, formattedDate, classType, liveOpts, quota),
+      ]);
+      const f1 = safeParseFare(e1.fare);
+      const f2 = safeParseFare(e2.fare);
+      if (f1 === 0 && f2 === 0) {
+        console.log(`[enrichSplitCandidates] DROPPED ${cand.hub}: both fares zero`);
+        continue;
+      }
+      const l1Arr = e1.arrivalTime || '';
+      const l2Dep = e2.departureTime || '';
+      if (!l1Arr || !l2Dep) continue;
+
+      const arrivalMs = parseTime(l1Arr, formattedDate).getTime();
+      let depMs = parseTime(l2Dep, formattedDate).getTime();
+      while (depMs < arrivalMs) depMs += 86400000;
+      const layoverHrs = (depMs - arrivalMs) / 3600000;
+      if (layoverHrs < 0 || layoverHrs > 24) continue;
+
+      results.push({
+        hubStation: cand.hub,
+        hubStationName: cand.hubName,
+        layoverDuration: formatDuration(depMs - arrivalMs),
+        layoverHours: layoverHrs,
+        leg1Date: railDateToIso(formattedDate),
+        leg2Date: railDateToIso(formatRailDate(new Date(depMs))),
+        leg1DepartureDate: e1.departureDate,
+        leg1ArrivalDate: e1.arrivalDate,
+        leg2DepartureDate: e2.departureDate,
+        leg1Fare: f1,
+        leg2Fare: f2,
+        totalFare: f1 + f2,
+        score: 100 - layoverHrs * 2 + (cand.score - 50) * 0.4,
+        leg1: e1,
+        leg2: e2,
+        combinedConfirmationChance: null,
+        isHeritage: false,
+      });
+    } catch (e) {
+      console.warn(`[enrichSplitCandidates] failed hub=${cand.hub}:`, e);
+    }
+  }
+
+  results.sort((a, b) => (b.score || 0) - (a.score || 0));
+  return results;
+}
+
+export async function findSmartRoutes(source: string, dest: string, date: string, classType: string = 'Any', directTrains: any[] = [], preferredHubInput: string = '', options: TrainSearchOptions = {}, quota: string = 'GN'): Promise<SplitRouteResult[]> {
+  console.log(`[findSmartRoutes] Searching split routes for ${source} → ${dest} on ${date}`);
+  const routes = await findSmartRoutesForDate(source, dest, date, classType, directTrains, preferredHubInput, options, quota);
+  console.log(`[findSmartRoutes] Got ${routes.length} routes from planner`);
+  return routes;
+}
+
+export async function findSmartRoutesForDate(source: string, dest: string, date: string, classType: string = 'Any', directTrains: any[] = [], preferredHubInput: string = '', options: TrainSearchOptions = {}, quota: string = 'GN'): Promise<SplitRouteResult[]> {
+  const startTime = Date.now();
+  const timeout = options.globalTimeoutMs || 15000;
+  source = normalizeStationCode(source);
+  dest = normalizeStationCode(dest);
+  const formattedDate = formatDateStr(date);
+  console.log(`[findSmartRoutesForDate] ${source} → ${dest} on ${formattedDate}, timeout=${timeout}ms`);
+
+  const HUB_LIST = [
+    'NDLS','ANVT','CNB','ALD','MGS','PRYJ','DNR','LKO','GKP','BSB',
+    'DHN','KGP','HWH','SDAH','ASN','BWN','DDN','CDG','RBL','TKD'
+  ].filter(h => h !== source && h !== dest);
+
+  const legOpts: TrainSearchOptions = { ...options, fetchLive: false, providerPairLimit: 2, maxSplitCandidates: 100 };
+  const allRoutes: any[] = [];
+
+  for (const hub of HUB_LIST.slice(0, 15)) {
+    if (Date.now() - startTime > timeout - 3000) break;
+    try {
+      const [l1, l2] = await Promise.all([
+        searchTrainsSmart(source, hub, formattedDate, legOpts),
+        searchTrainsSmart(hub, dest, formattedDate, legOpts),
+      ]);
+      if (l1.length === 0 || l2.length === 0) continue;
+      console.log(`[split] hub=${hub} leg1=${l1.length} leg2=${l2.length}`);
+      for (const t1 of l1.slice(0, 5)) {
+        for (const t2 of l2.slice(0, 5)) {
+          const tn1 = cleanTrainNo(t1.trainNo || t1.train_no);
+          const tn2 = cleanTrainNo(t2.trainNo || t2.train_no);
+          if (tn1 && tn2 && tn1 === tn2) continue;
+          allRoutes.push({
+            hub,
+            t1: { ...t1, _journeyDate: formattedDate },
+            t2: { ...t2, _journeyDate: formattedDate },
+            score: 50,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn(`[split] hub ${hub} failed:`, e);
+    }
+  }
+  console.log(`[findSmartRoutesForDate] potentialRoutes before enrichment: ${allRoutes.length}`);
+
+  const results: SplitRouteResult[] = [];
+  let enriched = 0;
+  for (const route of allRoutes) {
+    if (enriched >= 15) break;
+    try {
+      const liveOpts: TrainSearchOptions = { ...options, fetchLive: true, fetchAllClasses: false, debug: false };
+      const [e1, e2] = await Promise.all([
+        enrichWithLiveAvailability({ ...route.t1 }, formattedDate, classType, liveOpts, quota),
+        enrichWithLiveAvailability({ ...route.t2 }, formattedDate, classType, liveOpts, quota),
+      ]);
+      const f1 = safeParseFare(e1.fare);
+      const f2 = safeParseFare(e2.fare);
+      if (f1 === 0 && f2 === 0) {
+        console.log(`[split] DROPPED ${e1.trainNo}-${route.hub}-${e2.trainNo}: both fares zero`);
+        continue;
+      }
+      const l1Arr = e1.arrivalTime || '';
+      const l2Dep = e2.departureTime || '';
+      if (!l1Arr || !l2Dep) {
+        console.log(`[split] DROPPED ${e1.trainNo}-${route.hub}-${e2.trainNo}: missing times`);
+        continue;
+      }
+      const arrivalMs = parseTime(l1Arr, formattedDate).getTime();
+      let depMs = parseTime(l2Dep, formattedDate).getTime();
+      while (depMs < arrivalMs) depMs += 86400000;
+      const layoverHrs = (depMs - arrivalMs) / 3600000;
+      if (layoverHrs < 0 || layoverHrs > 24) {
+        console.log(`[split] DROPPED ${e1.trainNo}-${route.hub}-${e2.trainNo}: layover ${layoverHrs.toFixed(1)}h`);
+        continue;
+      }
+      results.push({
+        hubStation: route.hub,
+        hubStationName: hubLabel(route.hub),
+        layoverDuration: formatDuration(depMs - arrivalMs),
+        layoverHours: layoverHrs,
+        leg1Date: railDateToIso(formattedDate),
+        leg2Date: railDateToIso(formatRailDate(new Date(depMs))),
+        leg1DepartureDate: e1.departureDate,
+        leg1ArrivalDate: e1.arrivalDate,
+        leg2DepartureDate: e2.departureDate,
+        leg1Fare: f1,
+        leg2Fare: f2,
+        totalFare: f1 + f2,
+        score: 100 - layoverHrs * 2,
+        leg1: e1,
+        leg2: e2,
+        combinedConfirmationChance: null,
+        isHeritage: false,
+      });
+      enriched++;
+    } catch (e) {
+      console.warn(`[split] enrichment failed ${route.t1.trainNo}-${route.hub}-${route.t2.trainNo}:`, e);
+    }
+  }
+  results.sort((a, b) => (b.score || 0) - (a.score || 0) || (b.totalFare || 0) - (a.totalFare || 0));
+  console.log(`[findSmartRoutesForDate] FINAL: ${results.length} routes`);
+  return results.slice(0, 15);
 }
 
 function normalizeLegTime(time: string, baseDate: string, afterMs?: number) {
@@ -3187,18 +2885,18 @@ function scoreMultiSplitRoute(legs: TrainResult[], layoverHours: number[]) {
   return Math.max(0, Math.min(100, Math.round(92 + seatScore - layoverPenalty - durationHours * 0.7)));
 }
 
-export async function findMultiSplitRoutes(source: string, dest: string, date: string, classType: string = 'Any', preferredHubInput: string = '', options: TrainSearchOptions = {}): Promise<MultiSplitRouteResult[]> {
+export async function findMultiSplitRoutes(source: string, dest: string, date: string, classType: string = 'Any', preferredHubInput: string = '', options: TrainSearchOptions = {}, quota: string = 'GN'): Promise<MultiSplitRouteResult[]> {
   source = normalizeStationCode(source);
   dest = normalizeStationCode(dest);
   const preferredHub = normalizeStationCode(preferredHubInput);
   const hasPreferredHub = Boolean(preferredHub && preferredHub !== source && preferredHub !== dest);
-  const multiPlanLimit = quickLimit(options, options.maxMultiPlans, hasPreferredHub ? 18 : 10);
-  const multiLegLimit = quickLimit(options, options.maxMultiLegOptions, 5);
-  const multiCandidateLimit = quickLimit(options, options.maxMultiCandidates, 72);
-  const multiResultLimit = quickLimit(options, options.maxMultiResults, 12);
+  const multiPlanLimit = quickLimit(options, options.maxMultiPlans, hasPreferredHub ? 25 : 20);
+  const multiLegLimit = quickLimit(options, options.maxMultiLegOptions, 8);
+  const multiCandidateLimit = quickLimit(options, options.maxMultiCandidates, 200);
+  const multiResultLimit = quickLimit(options, options.maxMultiResults, 20);
   const legSearchOptions: TrainSearchOptions = {
     ...options,
-    providerPairLimit: 1,
+    providerPairLimit: 3,
   };
 
   try {
@@ -3305,7 +3003,7 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
       try {
         const legs: TrainResult[] = [];
         for (const train of route.trains) {
-          const enriched = await enrichWithLiveAvailability(train, formattedDate, classType, options);
+          const enriched = await enrichWithLiveAvailability(train, formattedDate, classType, options, quota);
           if (!hasVerifiedLiveClass(enriched)) {
             legs.length = 0;
             break;

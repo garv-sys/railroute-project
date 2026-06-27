@@ -2751,7 +2751,7 @@ export function ClassRateStrip({
           );
         }
 
-        if (error || (quote && !hasData) || (!needsFetch && !hasData)) {
+        if (error || (quote && !hasData) || (!needsFetch && !hasData) || (!quote && !needsFetch)) {
           return (
             <button
               key={`${train?.trainNo || "train"}-${classCode}`}

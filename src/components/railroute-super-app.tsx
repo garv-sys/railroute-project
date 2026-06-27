@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, type ReactNode, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -1302,6 +1303,7 @@ function CoachPreview({ classType, availability }: { classType: string; availabi
   );
 }
 
+
 function ResultsBoard({
   trains,
   splits,
@@ -1315,6 +1317,9 @@ function ResultsBoard({
   smartToggles,
   favorites,
   setFavorites,
+  splitLoadingMore = false,
+  splitHasMore = false,
+  onScrollNearBottom,
 }: {
   trains: any[];
   splits: any[];
@@ -1328,7 +1333,26 @@ function ResultsBoard({
   smartToggles: SmartToggle[];
   favorites: string[];
   setFavorites: (value: string[]) => void;
+  splitLoadingMore?: boolean;
+  splitHasMore?: boolean;
+  onScrollNearBottom?: () => void;
 }) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!onScrollNearBottom) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) onScrollNearBottom();
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [onScrollNearBottom]);
+
   function toggleFilter(filter: string) {
     setFilters(filters.includes(filter) ? filters.filter((item) => item !== filter) : [...filters, filter]);
   }
@@ -1412,6 +1436,8 @@ function ResultsBoard({
     setFavorites(favorites.includes(id) ? favorites.filter((item) => item !== id) : [...favorites, id]);
   }
 
+  const showSplitSection = smartToggles.includes("split");
+
   return (
     <section id="results" className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -1424,7 +1450,7 @@ function ResultsBoard({
               <span>·</span>
               <span>{trains.length} direct</span>
               <span>·</span>
-              <span>{splitTrainCards.length} split</span>
+              <span>{splitTrainCards.length} split{splitHasMore ? " (more loading)" : ""}</span>
             </div>
           )}
           <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-slate-400">Compare direct trains, split journeys, fares, delay reliability, route details, and seats in one view.</p>
@@ -1491,9 +1517,34 @@ function ResultsBoard({
           />
         ))}
       </div>
+
+      {/* Infinite scroll sentinel — positioned after all visible results */}
+      {showSplitSection && (
+        <>
+          {splitLoadingMore && (
+            <div className="mt-6 flex flex-col items-center gap-3 rounded-[28px] border border-cyan-300/20 bg-cyan-950/30 py-8 backdrop-blur-xl">
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-5 w-5 animate-spin text-cyan-300" />
+                <span className="text-sm font-black text-cyan-200">Loading more split routes…</span>
+              </div>
+              <span className="text-xs font-semibold text-slate-500">Fetching live fares & availability for next batch</span>
+            </div>
+          )}
+          {!splitLoadingMore && !splitHasMore && splits.length > 0 && (
+            <div className="mt-6 flex items-center justify-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-950/30 px-5 py-2.5 text-xs font-black text-emerald-200 mx-auto w-fit">
+              <Check className="h-3.5 w-3.5" />
+              All {splits.length} split routes loaded
+            </div>
+          )}
+          {/* Sentinel triggers next batch when 10% visible */}
+          <div ref={sentinelRef} className="h-1 w-full" aria-hidden="true" />
+        </>
+      )}
     </section>
   );
 }
+
+
 
 function IndiaMapExperience({
   source,
@@ -1900,6 +1951,10 @@ export function RailRouteSuperApp() {
   const [filters, setFilters] = useState<string[]>([]);
   const [direct, setDirect] = useState<ApiState<any[]>>({ loading: false, error: "", data: null });
   const [splits, setSplits] = useState<any[]>([]);
+  const [splitPendingQueue, setSplitPendingQueue] = useState<any[]>([]);
+  const [splitLoadingMore, setSplitLoadingMore] = useState(false);
+  const [splitHasMore, setSplitHasMore] = useState(false);
+  const splitLoadingRef = useRef(false);
   const [recent, setRecent] = useState<{ source: string; destination: string; date: string }[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
 
@@ -1930,12 +1985,17 @@ export function RailRouteSuperApp() {
 
     setDirect({ loading: true, error: "", data: null });
     setSplits([]);
+    setSplitPendingQueue([]);
+    setSplitLoadingMore(false);
+    setSplitHasMore(false);
+    splitLoadingRef.current = false;
     const searchRecord = { source, destination, date };
     const updatedRecent = [searchRecord, ...recent.filter((item) => item.source !== source || item.destination !== destination)].slice(0, 5);
     setRecent(updatedRecent);
     localStorage.setItem("railroute_recent_searches", JSON.stringify(updatedRecent));
 
     try {
+      // ── DIRECT TRAIN SEARCH (completely unchanged) ────────────────────────────
       const directResult = await postJson<{ trains: any[] }>("/api/train-between", { source, destination, date, classType });
       let trains = directResult.trains || [];
 
@@ -1946,11 +2006,37 @@ export function RailRouteSuperApp() {
         trains = [...trains].sort((a, b) => parseDurationMinutes(a.duration) - parseDurationMinutes(b.duration));
       }
       setDirect({ loading: false, error: "", data: trains });
+      // ── END DIRECT TRAIN SEARCH ───────────────────────────────────────────────
 
       if (smartToggles.includes("split")) {
-        postJson<{ splitRoutes: any[] }>("/api/search-split", { source, destination, date, classType, directTrains: trains })
-          .then((data) => setSplits(data.splitRoutes || []))
-          .catch(() => setSplits([]));
+        // Phase 1: Generate all candidates (fast — no live data)
+        try {
+          const candRes = await postJson<{ candidates: any[] }>("/api/search-split-candidates", { source, destination, date, classType });
+          const allCandidates: any[] = candRes.candidates || [];
+          if (allCandidates.length > 0) {
+            // Phase 2: Enrich first batch of 5 immediately
+            const firstBatch = allCandidates.slice(0, 5);
+            const rest = allCandidates.slice(5);
+            setSplitPendingQueue(rest);
+            setSplitHasMore(rest.length > 0);
+            setSplitLoadingMore(true);
+            splitLoadingRef.current = true;
+            try {
+              const enrichRes = await postJson<{ routes: any[] }>("/api/search-split-enrich", { candidates: firstBatch, date, classType });
+              const enriched = enrichRes.routes || [];
+              setSplits(enriched);
+            } catch {
+              setSplits([]);
+            } finally {
+              setSplitLoadingMore(false);
+              splitLoadingRef.current = false;
+            }
+          }
+        } catch {
+          // Candidates generation failed — fall back gracefully with empty splits
+          setSplits([]);
+          setSplitHasMore(false);
+        }
       }
 
       window.setTimeout(() => document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
@@ -1968,6 +2054,30 @@ export function RailRouteSuperApp() {
     if (sourceStation) setSourceQuery(stationLabel(sourceStation));
     if (destStation) setDestinationQuery(stationLabel(destStation));
   }
+
+  const loadMoreSplits = useCallback(async () => {
+    if (splitLoadingRef.current || !splitHasMore || splitPendingQueue.length === 0) return;
+    setSplitLoadingMore(true);
+    splitLoadingRef.current = true;
+    const nextBatch = splitPendingQueue.slice(0, 5);
+    const remaining = splitPendingQueue.slice(5);
+    try {
+      const res = await postJson<{ routes: any[] }>("/api/search-split-enrich", {
+        candidates: nextBatch,
+        date,
+        classType,
+      });
+      const newRoutes = res.routes || [];
+      setSplits((prev) => [...prev, ...newRoutes]);
+      setSplitPendingQueue(remaining);
+      setSplitHasMore(remaining.length > 0);
+    } catch (e) {
+      console.error("Failed to load more split routes", e);
+    } finally {
+      setSplitLoadingMore(false);
+      splitLoadingRef.current = false;
+    }
+  }, [splitPendingQueue, splitHasMore, date, classType]);
 
   const bestTrain = direct.data?.[0] || null;
   const routeLabel = source && destination ? `${stationLabelFromCode(source)} to ${stationLabelFromCode(destination)}` : "Choose your railway corridor";
@@ -2164,6 +2274,9 @@ export function RailRouteSuperApp() {
         smartToggles={smartToggles}
         favorites={favorites}
         setFavorites={setFavorites}
+        splitLoadingMore={splitLoadingMore}
+        splitHasMore={splitHasMore}
+        onScrollNearBottom={loadMoreSplits}
       />
       <IndiaMapExperience
         source={source}
@@ -2471,6 +2584,10 @@ export function RailRouteSearchWorkspace({
   const [filters, setFilters] = useState<string[]>([]);
   const [direct, setDirect] = useState<ApiState<any[]>>({ loading: false, error: "", data: null });
   const [splits, setSplits] = useState<any[]>([]);
+  const [splitPendingQueue, setSplitPendingQueue] = useState<any[]>([]);
+  const [splitLoadingMore, setSplitLoadingMore] = useState(false);
+  const [splitHasMore, setSplitHasMore] = useState(false);
+  const splitLoadingRef = useRef(false);
   const [recent, setRecent] = useState<{ source: string; destination: string; date: string }[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
 
@@ -2501,12 +2618,17 @@ export function RailRouteSearchWorkspace({
 
     setDirect({ loading: true, error: "", data: null });
     setSplits([]);
+    setSplitPendingQueue([]);
+    setSplitLoadingMore(false);
+    setSplitHasMore(false);
+    splitLoadingRef.current = false;
     const searchRecord = { source, destination, date };
     const updatedRecent = [searchRecord, ...recent.filter((item) => item.source !== source || item.destination !== destination)].slice(0, 5);
     setRecent(updatedRecent);
     localStorage.setItem("railroute_recent_searches", JSON.stringify(updatedRecent));
 
     try {
+      // ── DIRECT TRAIN SEARCH (completely unchanged) ────────────────────────────
       const directResult = await postJson<{ trains: any[] }>("/api/train-between", { source, destination, date, classType });
       let trains = directResult.trains || [];
       if (mode === "cheapest" || smartToggles.includes("lowest")) {
@@ -2516,11 +2638,36 @@ export function RailRouteSearchWorkspace({
         trains = [...trains].sort((a, b) => parseDurationMinutes(a.duration) - parseDurationMinutes(b.duration));
       }
       setDirect({ loading: false, error: "", data: trains });
+      // ── END DIRECT TRAIN SEARCH ───────────────────────────────────────────────
 
       if (smartToggles.includes("split")) {
-        postJson<{ splitRoutes: any[] }>("/api/search-split", { source, destination, date, classType, directTrains: trains })
-          .then((data) => setSplits(data.splitRoutes || []))
-          .catch(() => setSplits([]));
+        // Phase 1: Generate all candidates (fast — no live data)
+        try {
+          const candRes = await postJson<{ candidates: any[] }>("/api/search-split-candidates", { source, destination, date, classType });
+          const allCandidates: any[] = candRes.candidates || [];
+          if (allCandidates.length > 0) {
+            // Phase 2: Enrich first batch of 5 immediately
+            const firstBatch = allCandidates.slice(0, 5);
+            const rest = allCandidates.slice(5);
+            setSplitPendingQueue(rest);
+            setSplitHasMore(rest.length > 0);
+            setSplitLoadingMore(true);
+            splitLoadingRef.current = true;
+            try {
+              const enrichRes = await postJson<{ routes: any[] }>("/api/search-split-enrich", { candidates: firstBatch, date, classType });
+              const enriched = enrichRes.routes || [];
+              setSplits(enriched);
+            } catch {
+              setSplits([]);
+            } finally {
+              setSplitLoadingMore(false);
+              splitLoadingRef.current = false;
+            }
+          }
+        } catch {
+          setSplits([]);
+          setSplitHasMore(false);
+        }
       }
     } catch (error) {
       setDirect({ loading: false, error: error instanceof Error ? error.message : "Railway search failed.", data: null });
@@ -2544,6 +2691,30 @@ export function RailRouteSearchWorkspace({
     if (sourceStation) setSourceQuery(stationLabel(sourceStation));
     if (destStation) setDestinationQuery(stationLabel(destStation));
   }
+
+  const loadMoreSplits = useCallback(async () => {
+    if (splitLoadingRef.current || !splitHasMore || splitPendingQueue.length === 0) return;
+    setSplitLoadingMore(true);
+    splitLoadingRef.current = true;
+    const nextBatch = splitPendingQueue.slice(0, 5);
+    const remaining = splitPendingQueue.slice(5);
+    try {
+      const res = await postJson<{ routes: any[] }>("/api/search-split-enrich", {
+        candidates: nextBatch,
+        date,
+        classType,
+      });
+      const newRoutes = res.routes || [];
+      setSplits((prev) => [...prev, ...newRoutes]);
+      setSplitPendingQueue(remaining);
+      setSplitHasMore(remaining.length > 0);
+    } catch (e) {
+      console.error("Failed to load more split routes", e);
+    } finally {
+      setSplitLoadingMore(false);
+      splitLoadingRef.current = false;
+    }
+  }, [splitPendingQueue, splitHasMore, date, classType]);
 
   const bestTrain = direct.data?.[0] || null;
   const routeLabel = source && destination ? `${stationLabelFromCode(source)} to ${stationLabelFromCode(destination)}` : "Choose your railway corridor";
@@ -2644,6 +2815,9 @@ export function RailRouteSearchWorkspace({
         smartToggles={smartToggles}
         favorites={favorites}
         setFavorites={setFavorites}
+        splitLoadingMore={splitLoadingMore}
+        splitHasMore={splitHasMore}
+        onScrollNearBottom={loadMoreSplits}
       />
       <IndiaMapExperience
         source={source}

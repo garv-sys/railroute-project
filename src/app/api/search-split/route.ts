@@ -3,13 +3,6 @@ import { buildTrustMeta } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
 
-// Verifying live fare + seat availability for ~30 split-journey candidates means
-// dozens of provider calls inside one request. The previous implicit default
-// (10s on most Vercel plans) was getting hit mid-enrichment, which is the main
-// reason split search used to come back sparse or empty. 60s gives the
-// enrichment budget below (see enrichDeadlineMs) real room to work with.
-export const maxDuration = 60;
-
 function localRecommendation(directTrains: any[], splitRoutes: any[], multiSplitRoutes: any[] = [], budget?: string) {
   const budgetNote = budget ? ` Budget filter requested: ${budget}.` : "";
   return `Provider returned ${directTrains?.length || 0} direct train(s), ${splitRoutes?.length || 0} two-leg split option(s), and ${multiSplitRoutes?.length || 0} multi-leg split option(s).${budgetNote}`;
@@ -43,10 +36,19 @@ export async function POST(request: Request) {
   }
   try {
     const body = await request.json();
-    const { source, destination, date, classType = "Any", directTrains = [], budget, preferredHub = "", debug = false } = body;
+    const { source, destination, date, classType = "Any", directTrains = [], budget, preferredHub = "", debug = false, quota = "GN" } = body;
 
     if (!source || !destination || !date) {
       return validationFailure('Missing required parameters', requestId);
+    }
+
+    const MAX_BOOKING_DAYS = 60;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDate = new Date(date);
+    const daysFromToday = Math.round((selectedDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysFromToday < 0 || daysFromToday > MAX_BOOKING_DAYS) {
+      return validationFailure('Booking window is 60 days. Please select an earlier date.', requestId);
     }
 
     const coverageMode = "quick" as const;
@@ -57,65 +59,59 @@ export async function POST(request: Request) {
       coverageMode,
       exactStationOnly: false,
       providerPairLimit: 8,
-      maxSplitHubs: 200,
-      maxSplitLegOptions: 40,
-      maxSplitCandidates: 3000,
-      maxSplitResults: 50,
-      maxMultiPlans: 0,
-      maxMultiLegOptions: 0,
-      maxMultiCandidates: 0,
-      maxMultiResults: 0,
-      plannerLegTimeoutMs: 5000,
-      globalTimeoutMs: 9000,
+      maxSplitHubs: 500,
+      maxSplitLegOptions: 80,
+      maxSplitCandidates: 8000,
+      maxSplitResults: 80,
+      maxMultiPlans: 30,
+      maxMultiLegOptions: 8,
+      maxMultiCandidates: 150,
+      maxMultiResults: 20,
+      plannerLegTimeoutMs: 3500,
+      globalTimeoutMs: 25000,
     } as const;
 
-    const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions);
-    const multiSplitRoutes = splitRoutes.length >= 20
+    const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions, quota);
+    const multiSplitRoutes = splitRoutes.length >= 60
       ? []
       : await withTimeout(
           findMultiSplitRoutes(source, destination, date, classType, preferredHub, {
             ...plannerOptions,
-            maxMultiPlans: 10,
-            maxMultiLegOptions: 4,
-            maxMultiCandidates: 80,
-            maxMultiResults: 16,
-          }),
-          3000,
+            maxMultiPlans: 30,
+            maxMultiLegOptions: 8,
+            maxMultiCandidates: 150,
+            maxMultiResults: 20,
+          }, quota),
+          1500,
           []
         );
+
+    console.log('[search-split] source=', source, 'dest=', destination, 'date=', date, 'classType=', classType, 'quota=', quota);
+    console.log('[search-split] splitRoutes from planner:', splitRoutes.length);
+    console.log('[search-split] multiSplitRoutes from planner:', multiSplitRoutes.length);
 
     const isProviderBookingBlocked = (value: unknown) => {
       return /not available for booking|not bookable|train not on scheduled date|not scheduled|not running|class does not exist|class not available|class not returned|does not exist in this train|cancelled/i.test(String(value || ""));
     };
 
-    const isLegVerifiedAndBookable = (leg: any) => {
-      if (!leg) return false;
-      const availabilityStatus = leg.availabilityStatus || 'NOT_CHECKED';
-      const fareStatus = leg.fareStatus || 'NOT_CHECKED';
-      
-      const fareStr = String(leg.fare || '');
-      const fare = Number(fareStr.replace(/[^\d.]/g, '')) || 0;
-
+    const isLegBlocked = (leg: any) => {
+      if (!leg) return true;
       const availText = String(leg.availability || "").toUpperCase();
       const reason = String(leg.lookupReason || "").toUpperCase();
+      return isProviderBookingBlocked(availText) || isProviderBookingBlocked(reason);
+    };
 
-      if (isProviderBookingBlocked(availText) || isProviderBookingBlocked(reason)) {
-        return false;
-      }
-
-      const visibleSeatStatus = /\bAVAILABLE\b|\bAVL\b|RAC|WL|WAIT|REGRET|CNF|CONFIRM/.test(availText) &&
-        !/NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|NOT RUNNING|CLASS NOT AVAILABLE|CHECK SEATS|TAP TO CHECK|UNAVAILABLE/.test(availText);
-
-      return availabilityStatus === 'VERIFIED' && fareStatus === 'VERIFIED' && fare > 0 && visibleSeatStatus;
+    const parseFareVal = (fareStrOrNum: any) => {
+      const fareStr = String(fareStrOrNum || '');
+      return Number(fareStr.replace(/[^\d.]/g, '')) || 0;
     };
 
     const cleanTrain = (no: string) => String(no || '').trim().replace(/\D/g, '');
 
-    const getDiverseSplitRoutes = (routes: any[], limit = 30) => {
+    const getDiverseSplitRoutes = (routes: any[], limit = 50) => {
       const selected: any[] = [];
       const trainCounts = new Map<string, number>();
       const hubCounts = new Map<string, number>();
-      const seenCombos = new Set<string>();
 
       let remaining = [...routes];
 
@@ -125,7 +121,7 @@ export async function POST(request: Request) {
           const t2 = cleanTrain(r.leg2?.trainNo);
           const t1Rep = trainCounts.get(t1) || 0;
           const t2Rep = trainCounts.get(t2) || 0;
-          const penalty = (t1Rep + t2Rep) * 20;
+          const penalty = (t1Rep + t2Rep) * 10;
           return { route: r, score: (r.score || 0) - penalty };
         });
 
@@ -139,154 +135,126 @@ export async function POST(request: Request) {
         const t2 = cleanTrain(r.leg2?.trainNo);
         if (!t1 || !t2) continue;
 
-        const comboKey1 = `${t1}_${t2}`;
-        const comboKey2 = `${t2}_${t1}`;
-        if (seenCombos.has(comboKey1) || seenCombos.has(comboKey2)) {
-          continue;
-        }
-
         const hub = r.hubStation;
         const hubCount = hubCounts.get(hub) || 0;
-        if (hubCount >= 4) {
-          continue;
-        }
+        if (hubCount >= 12) continue;
+
+        const t1Count = trainCounts.get(t1) || 0;
+        const t2Count = trainCounts.get(t2) || 0;
+        if (t1Count >= 8 && t2Count >= 8) continue;
 
         selected.push(r);
-        seenCombos.add(comboKey1);
-        seenCombos.add(comboKey2);
         hubCounts.set(hub, hubCount + 1);
-        trainCounts.set(t1, (trainCounts.get(t1) || 0) + 1);
-        trainCounts.set(t2, (trainCounts.get(t2) || 0) + 1);
+        trainCounts.set(t1, t1Count + 1);
+        trainCounts.set(t2, t2Count + 1);
       }
 
       return selected;
     };
 
-    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 30);
+    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 50);
+    console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
-    // Attempt live enrichment on top candidates within time budget.
-    // We do NOT discard routes that fail enrichment — they remain as fallbacks.
-    // Enrich ALL routes in true parallel — no serial bail-out guard that starves later routes.
-    // Every route starts simultaneously; the whole batch races against a shared deadline.
-    //
-    // Try to verify all 30 candidates, not just the first 20 — with maxDuration=60 and a
-    // higher provider concurrency (see irctcService.ts) there's now real room to do this,
-    // and the ranking step below means a slow/unverified candidate no longer means an
-    // empty slot — it just ranks below the candidates that did verify in time.
-    const LIVE_TOP_SPLIT = Math.min(diverseRoutes.length, 30);
+    const LIVE_TOP_SPLIT = Math.min(diverseRoutes.length, 60);
     if (LIVE_TOP_SPLIT > 0) {
-      const enrichDeadlineMs = 38000; // total budget from API start, well inside maxDuration=60
-      const perRouteTimeoutMs = 9000; // per-route cap so one slow route can't block others
+      const enrichDeadlineMs = 20000;
+      const perRouteTimeoutMs = 15000;
 
       const enrichRoute = async (route: any) => {
         const legDate = route.leg1Date || route.leg2Date || date;
         try {
           const [leg1Enriched, leg2Enriched] = await Promise.all([
             withTimeout(
-              enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }),
+              enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
               perRouteTimeoutMs,
               route.leg1
             ),
             withTimeout(
-              enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }),
+              enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
               perRouteTimeoutMs,
               route.leg2
             ),
           ]);
-          if (leg1Enriched?.trainNo && leg2Enriched?.trainNo) {
-            route.leg1 = leg1Enriched;
-            route.leg2 = leg2Enriched;
-            route._liveEnriched = true;
-          }
+          if (leg1Enriched?.trainNo) route.leg1 = leg1Enriched;
+          if (leg2Enriched?.trainNo) route.leg2 = leg2Enriched;
         } catch (e) {
-          console.warn(`[search-split] Enrichment failed`, e);
+          console.warn(`[search-split] Enrichment failed for ${route.leg1?.trainNo}-${route.hubStation}-${route.leg2?.trainNo}:`, e);
         }
       };
 
-      const timeRemaining = Math.max(4000, enrichDeadlineMs - (Date.now() - apiStartTime));
+      const timeRemaining = Math.max(2000, enrichDeadlineMs - (Date.now() - apiStartTime));
       await Promise.race([
         Promise.all(diverseRoutes.slice(0, LIVE_TOP_SPLIT).map(enrichRoute)),
         new Promise((resolve) => setTimeout(resolve, timeRemaining))
       ]);
     }
 
-    // A leg is definitively rejected when IRCTC explicitly said the class/date is invalid.
-    // These are NOT transient errors — retrying or showing them as "unverified" is pointless.
-    const FIRM_REJECTION_RE =
-      /not available for booking|not bookable|train not on scheduled date|not scheduled|not running|class does not exist|class not available|class not returned|does not exist in this train|cancelled|no quota available/i;
-
-    const isLegDefinitelyRejected = (leg: any) => {
-      if (!leg) return false;
-      const availStatus = leg.availabilityStatus || 'NOT_CHECKED';
-      if (availStatus === 'VERIFIED') return false; // real seat data → definitely NOT rejected
-      const reason = String(leg.lookupReason || leg.availability || leg.availabilityText || '');
-      return FIRM_REJECTION_RE.test(reason);
-    };
-
-    const isNotBookable = (leg: any) => {
-      if (!leg) return false;
-      const reason = String(leg.lookupReason || leg.availability || leg.availabilityText || leg.status || '').toLowerCase();
-      return reason.includes("not bookable") || reason.includes("not available for booking") || reason.includes("train not on scheduled date");
-    };
-
-    const parseFareVal = (fareStrOrNum: any) => {
-      const fareStr = String(fareStrOrNum || '');
-      return Number(fareStr.replace(/[^\d.]/g, '')) || 0;
-    };
-
-    // Hard-exclude only what's factually wrong — a leg that IRCTC explicitly rejected,
-    // or a card with literally no fare on either leg. These aren't "couldn't verify in
-    // time" situations, they're "this combination cannot be booked" situations.
-    const candidatePool = diverseRoutes.filter(route => {
-      if (isNotBookable(route.leg1) || isNotBookable(route.leg2)) {
-        return false;
-      }
-      if (isLegDefinitelyRejected(route.leg1) || isLegDefinitelyRejected(route.leg2)) {
-        return false;
-      }
-      const f1 = parseFareVal(route.leg1.fare);
-      const f2 = parseFareVal(route.leg2.fare);
+    const finalRoutes = diverseRoutes.filter(route => {
+      const f1 = parseFareVal(route.leg1?.fare);
+      const f2 = parseFareVal(route.leg2?.fare);
       if (f1 === 0 && f2 === 0) {
+        console.log('[search-split] DROPPED both fares zero');
         return false;
       }
       return true;
     });
 
-    // Rank by real data quality rather than just slicing diversity order: routes where
-    // both legs came back fully verified (live fare + visible seats) rank highest, routes
-    // with only one leg verified rank next, and anything still unverified after the
-    // enrichment window keeps its pre-enrichment estimate score as a tiebreaker. This is
-    // what makes "best 15 of 30" actually mean best — previously the first 15 in diversity
-    // order were shown even when a worse-but-verified route sat further down the list, and
-    // a single slow leg could knock an otherwise-good card out of the results entirely.
-    const verificationBoost = (route: any) => {
-      const leg1Ok = isLegVerifiedAndBookable(route.leg1);
-      const leg2Ok = isLegVerifiedAndBookable(route.leg2);
-      if (leg1Ok && leg2Ok) return 200;
-      if (leg1Ok || leg2Ok) return 90;
-      return 0;
-    };
+    console.log('[search-split] finalRoutes after filter:', finalRoutes.length);
+    if (finalRoutes.length > 0) {
+      console.log('[search-split] sample route:', {
+        hub: finalRoutes[0].hubStation,
+        t1: finalRoutes[0].leg1?.trainNo,
+        t1fare: finalRoutes[0].leg1?.fare,
+        t1avail: finalRoutes[0].leg1?.availability,
+        t2: finalRoutes[0].leg2?.trainNo,
+        t2fare: finalRoutes[0].leg2?.fare,
+        t2avail: finalRoutes[0].leg2?.availability,
+      });
+    }
 
-    const rankedCandidates = candidatePool
-      .map((route, idx) => ({
-        route,
-        finalScore: (typeof route.score === 'number' ? route.score : 50) + verificationBoost(route) - idx * 0.01,
-      }))
-      .sort((a, b) => b.finalScore - a.finalScore)
-      .map((entry) => entry.route);
+    let filteredSplitRoutes = finalRoutes.slice(0, 15);
 
-    let filteredSplitRoutes = rankedCandidates.slice(0, 15);
-    const fullyVerifiedCount = filteredSplitRoutes.filter(
-      (route) => isLegVerifiedAndBookable(route.leg1) && isLegVerifiedAndBookable(route.leg2)
-    ).length;
+    if (filteredSplitRoutes.length < 15) {
+      console.log('[search-split] Need more routes, trying expanded search on original date only');
+      const retryOptions = {
+        ...plannerOptions,
+        maxSplitHubs: Math.min(plannerOptions.maxSplitHubs + 100, 1000),
+        maxSplitLegOptions: Math.min(plannerOptions.maxSplitLegOptions + 10, 120),
+        maxSplitCandidates: Math.min(plannerOptions.maxSplitCandidates + 1000, 15000),
+      };
+      const retryRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, retryOptions, quota);
+      console.log('[search-split] retryRoutes from planner:', retryRoutes.length);
+      const retryDiverse = getDiverseSplitRoutes(retryRoutes, 60);
+      console.log('[search-split] retryDiverse after diversity filter:', retryDiverse.length);
+      const existingKeys = new Set(filteredSplitRoutes.map(r => `${r.leg1?.trainNo}_${r.hubStation}_${r.leg2?.trainNo}`));
 
-    const LIVE_TOP_MULTI = Math.min(2, multiSplitRoutes.length);
+      for (const route of retryDiverse) {
+        if (filteredSplitRoutes.length >= 15) break;
+        const key = `${route.leg1?.trainNo}_${route.hubStation}_${route.leg2?.trainNo}`;
+        if (existingKeys.has(key)) continue;
+        
+        if (isLegBlocked(route.leg1)) continue;
+        if (isLegBlocked(route.leg2)) continue;
+        
+        const f1 = parseFareVal(route.leg1?.fare);
+        const f2 = parseFareVal(route.leg2?.fare);
+        if (f1 === 0 && f2 === 0) continue;
+
+        filteredSplitRoutes.push(route);
+        existingKeys.add(key);
+      }
+    }
+
+    filteredSplitRoutes = filteredSplitRoutes.slice(0, 15);
+    console.log('[search-split] FINAL filteredSplitRoutes:', filteredSplitRoutes.length);
+
+    const LIVE_TOP_MULTI = Math.min(15, multiSplitRoutes.length);
     if (LIVE_TOP_MULTI > 0) {
       const promises = multiSplitRoutes.slice(0, LIVE_TOP_MULTI).map(async (route, index) => {
         const legs = route.legs || [];
         try {
           const enrichedLegs = await Promise.all(
-            legs.map((leg: any) => enrichWithLiveAvailability(leg, date, classType, { fetchLive: true, fetchAllClasses: false, debug: false }))
+            legs.map((leg: any) => enrichWithLiveAvailability(leg, date, classType, { fetchLive: true, fetchAllClasses: false, debug: false }, quota))
           );
           if (enrichedLegs.every(el => el?.trainNo)) {
             multiSplitRoutes[index].legs = enrichedLegs;
@@ -296,23 +264,32 @@ export async function POST(request: Request) {
         }
       });
 
-      const timeRemainingMulti = Math.max(1500, 40000 - (Date.now() - apiStartTime));
+      const timeRemainingMulti = Math.max(500, Math.min(20000, 25000 - (Date.now() - apiStartTime)));
       await Promise.race([
         Promise.all(promises),
         new Promise((resolve) => setTimeout(resolve, timeRemainingMulti))
       ]);
     }
 
-    // Same fix: show all multi-leg routes, verified first, fallback last.
     const verifiedMulti = multiSplitRoutes.filter(route => {
       const legs = route.legs || [];
-      return legs.length > 0 && legs.every(isLegVerifiedAndBookable);
+      return legs.length > 0 && legs.every((leg: any) => {
+        const f = parseFareVal(leg.fare);
+        const a = String(leg.availability || '').toUpperCase();
+        const r = String(leg.lookupReason || '').toUpperCase();
+        return f > 0 && !isProviderBookingBlocked(a) && !isProviderBookingBlocked(r);
+      });
     });
     const unverifiedMulti = multiSplitRoutes.filter(route => {
       const legs = route.legs || [];
-      return legs.length > 0 && !legs.every(isLegVerifiedAndBookable);
+      return legs.length > 0 && !legs.every((leg: any) => {
+        const f = parseFareVal(leg.fare);
+        const a = String(leg.availability || '').toUpperCase();
+        const r = String(leg.lookupReason || '').toUpperCase();
+        return f > 0 && !isProviderBookingBlocked(a) && !isProviderBookingBlocked(r);
+      });
     });
-    let filteredMultiSplitRoutes = [...verifiedMulti, ...unverifiedMulti].slice(0, 5);
+    const filteredMultiSplitRoutes = [...verifiedMulti, ...unverifiedMulti].slice(0, 20);
 
     const routeRecommendation = localRecommendation(directTrains, filteredSplitRoutes, filteredMultiSplitRoutes, budget);
     const meta = buildTrustMeta({
@@ -334,8 +311,6 @@ export async function POST(request: Request) {
         routeRecommendation,
         coverageMode,
         canExpand: filteredSplitRoutes.length >= plannerOptions.maxSplitResults,
-        splitCandidatesConsidered: diverseRoutes.length,
-        splitFullyVerifiedCount: fullyVerifiedCount,
       },
     });
   } catch (error: any) {

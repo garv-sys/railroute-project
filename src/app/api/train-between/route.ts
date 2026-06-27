@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     });
   }
   try {
-    const { source, destination, date, classType = 'Any', debug = false } = await request.json();
+    const { source, destination, date, classType = 'Any', quota = 'GN' } = await request.json();
 
     if (!source || !destination || !date) {
       return validationFailure('Missing source, destination, or date', requestId);
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
       destination: String(destination).toUpperCase().trim(),
       date: String(date),
       classType: String(classType),
+      quota: String(quota).toUpperCase().trim(),
     };
     const trains = await checkDirectTrains(
       query.source,
@@ -42,7 +43,8 @@ export async function POST(request: Request) {
         exactStationOnly: false,
         providerPairLimit: 20,
         plannerLegTimeoutMs: 4000
-      }
+      },
+      query.quota
     );
 
     const meta = trustMetaForTrainList(trains);
