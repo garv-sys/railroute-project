@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   }
   try {
     const body = await request.json();
-    const { source, destination, date, classType = "Any", directTrains = [], budget, preferredHub = "", debug = false, quota = "GN" } = body;
+    const { source, destination, date, classType = "Any", directTrains = [], budget, preferredHub = "", debug = false, quota = "GN", mode = "" } = body;
 
     if (!source || !destination || !date) {
       return validationFailure('Missing required parameters', requestId);
@@ -158,7 +158,7 @@ export async function POST(request: Request) {
     const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 50);
     console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
-    const LIVE_TOP_SPLIT = Math.min(diverseRoutes.length, 60);
+    const LIVE_TOP_SPLIT = mode === 'quick' ? 0 : Math.min(diverseRoutes.length, 60);
     if (LIVE_TOP_SPLIT > 0) {
       const enrichDeadlineMs = 20000;
       const perRouteTimeoutMs = 15000;
@@ -264,7 +264,7 @@ export async function POST(request: Request) {
     filteredSplitRoutes = filteredSplitRoutes.slice(0, 15);
     console.log('[search-split] FINAL filteredSplitRoutes:', filteredSplitRoutes.length);
 
-    const LIVE_TOP_MULTI = Math.min(15, multiSplitRoutes.length);
+    const LIVE_TOP_MULTI = mode === 'quick' ? 0 : Math.min(15, multiSplitRoutes.length);
     if (LIVE_TOP_MULTI > 0) {
       const promises = multiSplitRoutes.slice(0, LIVE_TOP_MULTI).map(async (route, index) => {
         const legs = route.legs || [];
