@@ -743,17 +743,25 @@ export function TrainResultsWorkspace() {
 
       if (requestId !== searchRequestId.current) return;
 
+      // Defense in depth: reject any train whose own reported direction is the exact
+      // reverse of what was searched (e.g. a JP -> PNBE train showing up for a
+      // PNBE -> JP search). The backend (trainService.ts) already filters these out at
+      // the source, but this is a free, cheap backstop in case a provider quirk we
+      // haven't seen yet slips one through. We check trainSource/trainDestination
+      // first since those carry the provider's own from/to codes; source/destination
+      // on a TrainResult is always set to the *requested* stations, so it can't be
+      // used to detect a reversed train on its own.
+      const isReversedTrain = (t: any) => {
+        const tSrc = String(t?.trainSource || t?.source || '').toUpperCase();
+        const tDst = String(t?.trainDestination || t?.destination || '').toUpperCase();
+        const userSrc = (providerPayload.source || '').toUpperCase();
+        const userDst = (providerPayload.destination || '').toUpperCase();
+        return Boolean(tSrc && tDst && tSrc === userDst && tDst === userSrc);
+      };
+
       const mergedTrains = [
-        ...(forwardDirect.status === 'fulfilled' ? forwardDirect.value : []),
-        ...(reverseDirect.status === 'fulfilled' ? reverseDirect.value : []).filter((t: any) => {
-          const tSrc = (t.source || '').toUpperCase();
-          const tDst = (t.destination || '').toUpperCase();
-          const userSrc = (providerPayload.source || '').toUpperCase();
-          const userDst = (providerPayload.destination || '').toUpperCase();
-          if (tSrc === userDst && tDst === userSrc) return false;
-          if (tSrc === userSrc && tDst === userDst) return true;
-          return true;
-        }),
+        ...(forwardDirect.status === 'fulfilled' ? forwardDirect.value : []).filter((t: any) => !isReversedTrain(t)),
+        ...(reverseDirect.status === 'fulfilled' ? reverseDirect.value : []).filter((t: any) => !isReversedTrain(t)),
       ];
 
       setState((current) => ({ ...current, loading: false, trains: mergedTrains, error: mergedTrains.length === 0 && (forwardDirect.status !== 'fulfilled' && reverseDirect.status !== 'fulfilled') ? 'No direct trains found for this route.' : "" }));
@@ -786,7 +794,11 @@ export function TrainResultsWorkspace() {
             if (leg1Src === dst && leg1Dst === src) return false;
             if ((leg1Src === src || !leg1Src) && (leg2Dst === dst || leg2Src === dst)) return true;
             if (leg1Src === dst && leg2Dst === src) return false;
-            return true;
+            // Ambiguous/incomplete leg data — reject rather than default-accept. This
+            // came from a destination -> source query, so without a clear signal that
+            // it actually matches the requested source -> destination direction, the
+            // safer assumption is that it doesn't.
+            return false;
           });
         };
 

@@ -84,6 +84,8 @@ import {
   timeAmPm,
   useDebouncedValue,
   stationCompactLabel,
+  minBookableDateIso,
+  maxBookableDateIso,
 } from "./utils";
 import { LoadingBlock } from "./LoadingBlock";
 import { TrustSummary, QuotaTimingNotice, RunningDaysStrip, primaryClassCode, classAvailabilityStatus, compactSeatText, classAvailabilityText, returnedClassesForTrain, readableRailStatus, availabilityNumber, confirmationChanceFromStatus, waitlistConfirmationChance, fareToNumber, durationToMinutes, splitTotalDuration, splitLayoverMinutes, classFareAmount, trainFareAmount, timeToMinutes, multiSplitLayoverMinutes, actualLegSourceStation, actualLegDestinationStation, trainNumberName, isSeatAvailable, splitHasVerifiedFareAndSeats, formatFare, formatDurationLong, multiSplitHasVerifiedFareAndSeats } from "./TrustSummary";
@@ -267,10 +269,17 @@ export function RelatedStationChips({
 }
 
 export function DateQuickField({ date, setDate }: { date: string; setDate: (value: string) => void }) {
-  const options = [
-    ["June 21", "2026-06-21"],
-    ["July 21", "2026-07-21"],
-    ["August 21", "2026-08-21"],
+  // Indian Railways lets you book up to 60 days ahead of the journey date (excluding
+  // the journey date itself). These bounds — and the quick-pick shortcuts below — are
+  // computed from "today" on every render, so the window always stays correct instead
+  // of silently going stale the way a hardcoded calendar date would.
+  const minDate = minBookableDateIso();
+  const maxDate = maxBookableDateIso();
+  const options: [string, string][] = [
+    ["Today", todayIso()],
+    ["Tomorrow", todayIso(1)],
+    ["+1 week", addIsoDays(todayIso(), 7)],
+    ["Max (60d)", maxDate],
   ];
 
   return (
@@ -279,7 +288,7 @@ export function DateQuickField({ date, setDate }: { date: string; setDate: (valu
         <span className="text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">Date</span>
         <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500">{prettyDateLabel(date)}</span>
       </span>
-      <input type="date" min="2026-06-21" max="2026-08-21" value={date} onChange={(event) => setDate(event.target.value)} className="h-13 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-950 outline-none focus:border-cyan-400 dark:border-white/10 dark:bg-white/8 dark:text-white" />
+      <input type="date" min={minDate} max={maxDate} value={date} onChange={(event) => setDate(event.target.value)} className="h-13 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-950 outline-none focus:border-cyan-400 dark:border-white/10 dark:bg-white/8 dark:text-white" />
       <div className="mt-2 flex flex-wrap gap-2">
         {options.map(([label, value]) => (
           <button
@@ -296,6 +305,7 @@ export function DateQuickField({ date, setDate }: { date: string; setDate: (valu
           </button>
         ))}
       </div>
+      <p className="mt-2 text-[10px] font-bold text-slate-400 dark:text-slate-500">Bookable {prettyDateLabel(minDate)} – {prettyDateLabel(maxDate)} (60-day advance reservation window)</p>
     </label>
   );
 }
@@ -330,7 +340,7 @@ export function NearbyDateSuggestions({
 
     let active = true;
     const today = todayIso();
-    const nearbyDates = Array.from({ length: 7 }, (_, index) => addIsoDays(date, index - 3)).filter((item) => item >= today);
+    const nearbyDates = Array.from({ length: 7 }, (_, index) => addIsoDays(date, index - 3)).filter((item) => item >= today && item <= maxBookableDateIso());
     setNearby((current) => ({ loading: true, items: current.items.filter((item) => nearbyDates.includes(item.date)) }));
 
     Promise.all(

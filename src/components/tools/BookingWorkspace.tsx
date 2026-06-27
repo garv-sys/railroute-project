@@ -203,7 +203,7 @@ export function ProviderHealthDashboard() {
     ["Train list", cache.queues?.trainList],
     ["Availability", cache.queues?.availability],
   ];
-  const qaDate = "2026-07-29";
+  const qaDate = todayIso(14); // always "2 weeks from today" instead of a date that goes stale
   const qaRoutes = [
     ["PNBE → JP", "PNBE", "JP"],
     ["PNBE → MAS", "PNBE", "MAS"],
