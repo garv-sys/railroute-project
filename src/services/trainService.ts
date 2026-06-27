@@ -2237,6 +2237,9 @@ export async function searchTrainsSmart(source: string, dest: string, date: stri
       };
 
       try {
+        if (options.fetchLive === false) {
+          return getFallbackResult();
+        }
         const res = await plannerTimeout(searchDirectTrains(pair.source, pair.dest, date), options.plannerLegTimeoutMs || 4500, null as any);
         if (!res) {
           logProviderIssue('train-between request timed out', { source: pair.source, dest: pair.dest, requestedSource: source, requestedDest: dest, date });
