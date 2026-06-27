@@ -1410,7 +1410,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
     availabilityStatusInput?: LookupTrustStatus,
     fareStatusInput?: LookupTrustStatus
   ): ClassAvailabilityItem => {
-    const isDemoMode = false;
+    const isDemoMode = !process.env.IRCTC_API_KEY;
     const finalFare = fare > 0 ? fare : (isDemoMode ? getFallbackMockFare(trainNo, source, destination, classCode) : 0);
     const availabilityStatus = notRunning
       ? 'PROVIDER_UNAVAILABLE'
@@ -1565,7 +1565,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
 
   try {
     const availData = await fetchAvailWithStationFallback(trainNo, source, destination, startDateStr, classCode, quota);
-    const isDemoMode = false;
+    const isDemoMode = !process.env.IRCTC_API_KEY;
     if (!availData || availData.success === false) {
       const errorMsg = availData?.error || 'Provider check failed';
       if (!isDemoMode) {
@@ -1843,7 +1843,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
     }
   } catch (error: any) {
     console.warn(`[IRCTC] Availability check failed for ${trainNo}`, error?.message || error);
-    const isDemoMode = false;
+    const isDemoMode = !process.env.IRCTC_API_KEY;
     if (!isDemoMode) {
       for (let j = 0; j < 60; j++) {
         const dj = new Date(baseDate.getTime());
