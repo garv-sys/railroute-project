@@ -5,13 +5,45 @@ import { acClassSet, runningDayNames, runningDayLabels, stationOverrides } from 
 import { stationByCode, titleCase } from "@/lib/railway-intelligence";
 import stationNamesDb from "@/data/station_names.json";
 
+// Indian Railways' booking day boundary runs on IST (UTC+5:30, no DST), but this app
+// runs on servers/browsers in arbitrary timezones (Vercel runs UTC). Shifting the clock
+// by the fixed IST offset before reading UTC date fields gives the correct IST calendar
+// date everywhere, without needing a timezone library.
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+function nowInIst(): Date {
+  return new Date(Date.now() + IST_OFFSET_MS);
+}
+
 export function todayIso(offset = 0) {
-  const date = new Date();
+  const date = nowInIst();
   date.setUTCDate(date.getUTCDate() + offset);
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+// Indian Railways' Advance Reservation Period: tickets can be booked up to 60 days
+// before the journey date, excluding the journey date itself, so the furthest bookable
+// journey date is "today + 60". (Reduced from 120 days to 60 days, effective 1 Nov 2024.)
+export const ADVANCE_RESERVATION_PERIOD_DAYS = 60;
+
+export function minBookableDateIso() {
+  return todayIso();
+}
+
+export function maxBookableDateIso() {
+  return addIsoDays(todayIso(), ADVANCE_RESERVATION_PERIOD_DAYS);
+}
+
+export function clampToBookableWindow(value: string) {
+  const min = minBookableDateIso();
+  const max = maxBookableDateIso();
+  if (!value) return min;
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
 }
 
 export function prettyDateLabel(value: string) {

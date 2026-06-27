@@ -1,6 +1,7 @@
 import Fuse from "fuse.js";
 
 import OFFICIAL_STATION_STATES from "@/data/station_states.json";
+import ALL_STATIONS_DATA from "@/data/all_stations.json";
 
 export type Station = {
   code: string;
@@ -80,7 +81,13 @@ function ensureStationsInitialized() {
   if (initialized) return;
   initialized = true;
 
-  const STATIONS = typeof window === "undefined" ? require("@/data/all_stations.json") : [];
+  // Previously this only loaded the full station list on the server
+  // (`typeof window === "undefined"`) and used an empty array in the browser, to keep
+  // the client bundle small. That meant any station not in MANUAL_STATIONS or
+  // MAJOR_HUBS — i.e. most of the ~9,000 smaller stations and halts — couldn't be
+  // resolved to a name/state/label by client components at all. Now statically
+  // imported above, so both server and client get the full list.
+  const STATIONS = ALL_STATIONS_DATA;
   stationsCache = Array.from(
     new Map(
       ([...(STATIONS as Station[]), ...MANUAL_STATIONS])

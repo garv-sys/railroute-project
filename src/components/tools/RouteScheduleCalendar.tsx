@@ -5,7 +5,7 @@ import { Calendar as CalendarIcon, Train, Route, MapPin, ArrowRight, Info } from
 import MAJOR_TRAIN_ROUTES from "@/data/major_train_routes.json";
 import MAJOR_HUBS from "@/data/major_hubs.json";
 import { stationRelatedCodes, stationLabelFromCode } from "@/lib/railway-intelligence";
-import { journeyWeekdayIndex, stationCompactLabel, normalizeRunsOnDays } from "../shared/utils";
+import { journeyWeekdayIndex, stationCompactLabel, normalizeRunsOnDays, todayIso, minBookableDateIso, maxBookableDateIso, prettyDateLabel } from "../shared/utils";
 
 interface RouteScheduleCalendarProps {
   source: string;
@@ -39,7 +39,7 @@ export function RouteScheduleCalendar({
   searchResultsSplits,
   hasSearched = false,
 }: RouteScheduleCalendarProps) {
-  const [selectedCalendarDate, setSelectedCalendarDate] = useState(activeDate || "2026-06-21");
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(activeDate || todayIso());
 
   // Validate O-D pair
   const hasValidRoute = source && destination && source !== destination;
@@ -227,13 +227,26 @@ export function RouteScheduleCalendar({
     };
   }, [hasValidRoute, directMatch, splitMatch]);
 
-  // Generate date grids for June, July, August 2026
+  // Generate date grids spanning today through the 60-day bookable window
+  // (computed fresh each time — this used to be hardcoded to June/July/August 2026,
+  // which only worked for as long as "today" happened to fall in that span).
   const calendarMonths = useMemo(() => {
-    const months = [
-      { name: "June 2026", monthVal: 5, year: 2026 },
-      { name: "July 2026", monthVal: 6, year: 2026 },
-      { name: "August 2026", monthVal: 7, year: 2026 },
-    ];
+    const [startYear, startMonthOneIndexed] = minBookableDateIso().split("-").map(Number);
+    const [endYear, endMonthOneIndexed] = maxBookableDateIso().split("-").map(Number);
+
+    const months: { name: string; monthVal: number; year: number }[] = [];
+    let year = startYear;
+    let monthOneIndexed = startMonthOneIndexed;
+    while (year < endYear || (year === endYear && monthOneIndexed <= endMonthOneIndexed)) {
+      const monthVal = monthOneIndexed - 1;
+      const name = new Date(year, monthVal, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      months.push({ name, monthVal, year });
+      monthOneIndexed += 1;
+      if (monthOneIndexed > 12) {
+        monthOneIndexed = 1;
+        year += 1;
+      }
+    }
 
     return months.map(({ name, monthVal, year }) => {
       const firstDay = new Date(year, monthVal, 1);
@@ -251,7 +264,7 @@ export function RouteScheduleCalendar({
       // Calendar days
       for (let d = 1; d <= numDays; d++) {
         const dateStr = `${year}-${String(monthVal + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        const inRange = dateStr >= "2026-06-21" && dateStr <= "2026-08-21";
+        const inRange = dateStr >= minBookableDateIso() && dateStr <= maxBookableDateIso();
         const schedule = inRange ? getScheduleForDate(dateStr) : { direct: [], splits: [] };
 
         days.push({
@@ -266,6 +279,7 @@ export function RouteScheduleCalendar({
       return { name, days };
     });
   }, [getScheduleForDate]);
+
 
   // Selected date schedule details
   const activeSchedule = useMemo(() => {
@@ -308,7 +322,7 @@ export function RouteScheduleCalendar({
                 60-Day Route Schedule Grid
               </h4>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Visualizing scheduled train counts for <span className="font-bold text-slate-700 dark:text-slate-300">{stationCompactLabel(source)}</span> → <span className="font-bold text-slate-700 dark:text-slate-300">{stationCompactLabel(destination)}</span> (June 21 to August 21, 2026).
+                Visualizing scheduled train counts for <span className="font-bold text-slate-700 dark:text-slate-300">{stationCompactLabel(source)}</span> → <span className="font-bold text-slate-700 dark:text-slate-300">{stationCompactLabel(destination)}</span> ({prettyDateLabel(minBookableDateIso())} to {prettyDateLabel(maxBookableDateIso())}).
               </p>
             </div>
             <div className="flex gap-4 text-xs font-bold text-slate-500 dark:text-slate-400">

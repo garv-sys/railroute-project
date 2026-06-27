@@ -646,16 +646,23 @@ function trainRouteCodes(train: any) {
     .filter(Boolean);
 }
 
-function trainMatchesRequestedLeg(train: any, source: string, dest: string) {
+// Returns true/false when the full intermediate route confirms the order one way or
+// the other, or null when there's no route data to check at all (the common case for
+// the "trains between stations" list endpoint, which only ever returns from/to station
+// codes for each train — never a full stop-by-stop route). Callers must NOT treat null
+// as "matches" — that was the bug that let reverse-direction trains (e.g. a train that
+// actually runs JP -> PNBE) slip through a PNBE -> JP search whenever the provider
+// happened to return it.
+function trainMatchesRequestedLeg(train: any, source: string, dest: string): boolean | null {
   const route = trainRouteCodes(train);
   if (route.length > 0) {
     const sourceIndex = route.indexOf(source);
     const destIndex = route.indexOf(dest);
-    if (sourceIndex === -1 || destIndex === -1) return true;
+    if (sourceIndex === -1 || destIndex === -1) return null;
     return sourceIndex < destIndex;
   }
 
-  return true;
+  return null;
 }
 
 const CITY_TERMINAL_CLUSTERS: Record<string, string[]> = {
@@ -897,12 +904,30 @@ function uniqueStationPairs(pairs: { source: string; dest: string }[]) {
 }
 
 function trainMatchesSearchScope(train: any, source: string, dest: string) {
-  if (trainMatchesRequestedLeg(train, source, dest)) return true;
   const sourceScope = sameAreaTerminalClusterFor(source);
   const destScope = sameAreaTerminalClusterFor(dest);
-  if (sourceScope.length > 1 || destScope.length > 1) {
-    return sourceScope.includes(rawTrainSource(train)) && destScope.includes(rawTrainDestination(train));
+  const rawSource = rawTrainSource(train);
+  const rawDest = rawTrainDestination(train);
+
+  // When the provider reports both ends of this train's leg (from_stn_code/to_stn_code
+  // — present on essentially every real "trains between stations" response item), that
+  // is a complete, authoritative signal: trust it fully instead of falling back to a
+  // fuzzy "one side looks plausible" guess. A fuzzy guess is exactly what let
+  // wrong-direction trains (and, in principle, wrong-destination ones) through before —
+  // e.g. accepting a train because its origin was near Patna without checking that its
+  // reported destination was actually Jaipur and not somewhere else entirely.
+  if (rawSource && rawDest) {
+    return sourceScope.includes(rawSource) && destScope.includes(rawDest);
   }
+
+  // Provider didn't give a usable from/to for this train — fall back to the full
+  // intermediate route order, if one was supplied.
+  const legOrder = trainMatchesRequestedLeg(train, source, dest);
+  if (legOrder !== null) return legOrder;
+
+  // No reliable signal whatsoever (this should be rare in practice). Reject rather
+  // than guess — admitting an unverifiable train risks exactly the bug this function
+  // exists to prevent.
   return false;
 }
 
