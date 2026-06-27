@@ -1168,11 +1168,11 @@ export function trainJourneyDate(train: any, fallbackDate: string) {
 }
 
 export function liveSourceStation(train: any) {
-  return String(train?.trainSource || train?.availabilitySourceStation || train?.source || train?.from_stn_code || train?.fromStnCode || "").toUpperCase().trim();
+  return String(train?.trainSource || train?.availabilitySourceStation || train?._requestedSource || train?.source || train?.from_stn_code || train?.fromStnCode || "").toUpperCase().trim();
 }
 
 export function liveDestinationStation(train: any) {
-  return String(train?.trainDestination || train?.availabilityDestinationStation || train?.destination || train?.to_stn_code || train?.toStnCode || "").toUpperCase().trim();
+  return String(train?.trainDestination || train?.availabilityDestinationStation || train?._requestedDestination || train?.destination || train?.to_stn_code || train?.toStnCode || "").toUpperCase().trim();
 }
 
 export function requestedSourceStation(train: any, fallback = "") {

@@ -2881,6 +2881,7 @@ function SplitResultsPanel({
   classType: string;
   quota: string;
 }) {
+  const [visibleLimit, setVisibleLimit] = useState(5);
   const [readyKeys, setReadyKeys] = useState<Set<string>>(new Set());
   const [validKeys, setValidKeys] = useState<Set<string>>(new Set());
   const handleReady = useCallback((key: string, isValid?: boolean) => {
@@ -2889,9 +2890,11 @@ function SplitResultsPanel({
       setValidKeys((prev) => { const next = new Set(prev); next.add(key); return next; });
     }
   }, []);
-  const total = splits.length + multiSplits.length;
-  const readyCount = readyKeys.size + multiSplits.length; // multiSplits count as ready immediately
-  const validCount = validKeys.size + multiSplits.length;
+
+  const total = Math.min(splits.length, visibleLimit);
+  const readyCount = Array.from(readyKeys).filter(k => {
+    return splits.slice(0, visibleLimit).some(s => splitRouteStableKey(s) === k);
+  }).length;
   const allReady = readyCount >= total;
 
   return (
@@ -2901,27 +2904,17 @@ function SplitResultsPanel({
         <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/6">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
           <span className="text-sm font-black text-slate-600 dark:text-slate-300">
-            Checking live seats &amp; fares — {readyCount} of {total} ready
+            Checking live seats &amp; fares — {readyCount} of {total} checked
           </span>
         </div>
       )}
-      {allReady && validCount === 0 && (
-        <div className={softPanel("rounded-[30px] p-6")}>
-          <h3 className="text-2xl font-black">No verified split routes.</h3>
-          <p className="mt-2 text-sm font-semibold leading-6 text-slate-500 dark:text-slate-400">
-            We checked multiple split combinations, but none of them returned full verified fare and seat data for this date.
-          </p>
-        </div>
-      )}
-      {/* Render all cards — hidden until ready, then fade in IF valid */}
-      {splits.map((split, index) => {
+      {/* Render split cards */}
+      {splits.slice(0, visibleLimit).map((split, index) => {
         const key = splitRouteStableKey(split) || `${split.hubStation}-${index}`;
-        const isReady = readyKeys.has(key);
-        const isValid = validKeys.has(key);
         return (
           <div
             key={key}
-            className={`transition-all duration-500 ${isReady && isValid ? "opacity-100" : "pointer-events-none absolute opacity-0 w-0 h-0 overflow-hidden"}`}
+            className="transition-all duration-500 opacity-100"
           >
             <SplitJourneyCard
               split={split}
@@ -2936,6 +2929,18 @@ function SplitResultsPanel({
           </div>
         );
       })}
+      {/* Load More Button */}
+      {visibleLimit < splits.length && (
+        <button
+          type="button"
+          onClick={() => setVisibleLimit(prev => Math.min(splits.length, prev + 5))}
+          className="w-full py-3.5 rounded-2xl border border-dashed border-cyan-300 hover:border-cyan-400 bg-cyan-50/20 hover:bg-cyan-50/50 text-cyan-800 text-sm font-black transition flex items-center justify-center gap-2 dark:border-cyan-300/30 dark:hover:border-cyan-300/50 dark:text-cyan-200"
+        >
+          <Sparkles className="h-4 w-4 shrink-0" />
+          <span>Load More Split Journeys (Show {Math.min(splits.length - visibleLimit, 5)} more)</span>
+        </button>
+      )}
+      {/* Render multi-splits */}
       {multiSplits.map((split, index) => (
         <MultiSplitJourneyCard
           key={`${split.interchangeStations?.join("-") || "multi"}-${index}`}
