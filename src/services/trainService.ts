@@ -2873,7 +2873,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
     if (enriched >= 15) break;
     const routeString = `${route.t1.trainNo || route.t1.train_no} -> ${route.hub} -> ${route.t2.trainNo || route.t2.train_no}`;
     try {
-      const liveOpts: TrainSearchOptions = { ...options, fetchLive: true, fetchAllClasses: false, debug: false };
+      const liveOpts: TrainSearchOptions = { ...options, fetchLive: options.fetchLive !== false, fetchAllClasses: false, debug: false };
       const [e1, e2] = await Promise.all([
         enrichWithLiveAvailability({ ...route.t1 }, formattedDate, classType, liveOpts, quota),
         enrichWithLiveAvailability({ ...route.t2 }, formattedDate, classType, liveOpts, quota),
