@@ -95,24 +95,8 @@ import { ProductShell } from "../layout/ProductShell";
 import { ToolHeader } from "../layout/ToolHeader";
 import { CoachExplorer } from "./CoachExplorer";
 import { BookingWorkspace } from "./BookingWorkspace";
+import { RouteScheduleCalendar } from "./RouteScheduleCalendar";
 
-const CKP_RAJASTHAN_DESTINATION_OPTIONS = [
-  { code: "JP", label: "Jaipur", note: "Jaipur Jn" },
-  { code: "UDZ", label: "Udaipur", note: "Udaipur City" },
-  { code: "AWR", label: "Alwar", note: "Alwar Jn" },
-  { code: "JU", label: "Jodhpur", note: "Jodhpur Jn" },
-  { code: "AII", label: "Ajmer", note: "Ajmer Jn" },
-  { code: "BHL", label: "Bhilwara", note: "Bhilwara" },
-  { code: "KOTA", label: "Kota", note: "Kota Jn" },
-  { code: "SWM", label: "Sawai Madhopur", note: "Sawai Madhopur" },
-];
-
-const CKP_ALIASES = new Set(["CKP", "CHAKRADHARPUR", "CHAKRADHARPUR JN", "CHAKRADHARPUR JUNCTION"]);
-
-function isCkpInput(value: string, query: string) {
-  const candidates = [value, query].map((item) => String(item || "").toUpperCase().trim()).filter(Boolean);
-  return candidates.some((item) => CKP_ALIASES.has(item) || item.includes("CHAKRADHARPUR"));
-}
 
 export function TrainResultsWorkspace() {
   const searchRequestId = useRef(0);
@@ -131,7 +115,7 @@ export function TrainResultsWorkspace() {
   const [classType, setClassType] = useState("3A");
   const [quota, setQuota] = useState("GN");
   const allowSplit = true;
-  const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi">("all");
+  const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi" | "calendar">("all");
   const [sortBy, setSortBy] = useState<"best" | "cheapest" | "highestFare" | "fastest" | "lowestLayover" | "earliest" | "latest">("best");
   const [maxFare, setMaxFare] = useState("");
   const [maxDuration, setMaxDuration] = useState("");
@@ -172,8 +156,6 @@ export function TrainResultsWorkspace() {
       window.removeEventListener("railroute-recent-searches-updated", loadRecentSearches);
     };
   }, []);
-
-  const showCkpRajasthanOptions = isCkpInput(source, sourceQuery);
 
   function deleteRecentSearch(fromVal: string, toVal: string) {
     try {
@@ -303,6 +285,17 @@ export function TrainResultsWorkspace() {
         return trainName.includes(query) || trainNo.includes(query);
       });
     }
+    const isExplicitlyUnbookable = (availText: string) => {
+      if (!availText) return false;
+      const status = availText.toUpperCase();
+      if (/PROVIDER|DATA UNAVAILABLE|RATE_LIMIT/i.test(status)) return false;
+      return /NOT BOOKABLE|NOT RUNNING|CLASS NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|UNAVAILABLE/.test(status) && !/CHECK|TAP/.test(status);
+    };
+    unverified = unverified.filter((train) => {
+      const reqClass = selectedSortClass || primaryClassCode(train);
+      const availText = train?.classAvailability?.[reqClass]?.[0]?.text || train?.classAvailability?.[reqClass]?.[0]?.availabilityText || train?.availability;
+      return !isExplicitlyUnbookable(availText);
+    });
     const sortedUnverified = [...unverified].sort((a, b) => {
       const fareA = selectedSortClass ? classFareAmount(a, selectedSortClass) : trainFareAmount(a);
       const fareB = selectedSortClass ? classFareAmount(b, selectedSortClass) : trainFareAmount(b);
@@ -330,6 +323,19 @@ export function TrainResultsWorkspace() {
         return l1Name.includes(query) || l1No.includes(query) || l2Name.includes(query) || l2No.includes(query);
       });
     }
+    const isExplicitlyUnbookable = (availText: string) => {
+      if (!availText) return false;
+      const status = availText.toUpperCase();
+      if (/PROVIDER|DATA UNAVAILABLE|RATE_LIMIT/i.test(status)) return false;
+      return /NOT BOOKABLE|NOT RUNNING|CLASS NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|UNAVAILABLE/.test(status) && !/CHECK|TAP/.test(status);
+    };
+    unverified = unverified.filter((split) => {
+      const l1Class = selectedSortClass || primaryClassCode(split.leg1);
+      const l2Class = selectedSortClass || primaryClassCode(split.leg2);
+      const avail1 = split.leg1?.classAvailability?.[l1Class]?.[0]?.text || split.leg1?.classAvailability?.[l1Class]?.[0]?.availabilityText || split.leg1?.availability;
+      const avail2 = split.leg2?.classAvailability?.[l2Class]?.[0]?.text || split.leg2?.classAvailability?.[l2Class]?.[0]?.availabilityText || split.leg2?.availability;
+      return !isExplicitlyUnbookable(avail1) && !isExplicitlyUnbookable(avail2);
+    });
     const sortedUnverified = [...unverified].sort((a, b) => {
       if (sortBy === "lowestLayover") return splitLayoverMinutes(a) - splitLayoverMinutes(b);
       if (sortBy === "fastest") return (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
@@ -347,8 +353,8 @@ export function TrainResultsWorkspace() {
         (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
     });
 
-    return [...verified, ...sortedUnverified].slice(0, showCkpRajasthanOptions ? 28 : 15);
-  }, [filteredSplits, state.splits, sortBy, selectedSortClass, searchQuery, showCkpRajasthanOptions]);
+    return [...verified, ...sortedUnverified].slice(0, 15);
+  }, [filteredSplits, state.splits, sortBy, selectedSortClass, searchQuery]);
 
   const filteredMultiSplits = useMemo(() => {
     const fareLimit = Number(maxFare) || Infinity;
@@ -688,9 +694,12 @@ export function TrainResultsWorkspace() {
 
   function requestedLiveClasses(train: any, requestedClass: string) {
     const selected = String(requestedClass || "").toUpperCase();
-    if (selected && selected !== "ANY") return [selected];
-    const fallbackClass = selected && selected !== "ANY" ? selected : primaryClassCode(train);
-    return [fallbackClass].filter(Boolean);
+    const availableClasses = displayClassesForTrain(train);
+    if (!availableClasses.length) return selected && selected !== "ANY" ? [selected] : [primaryClassCode(train)].filter(Boolean);
+    if (!selected || selected === "ANY") return availableClasses;
+    // Move selected class to the front
+    const filtered = availableClasses.filter(c => c !== selected);
+    return [selected, ...filtered];
   }
 
 	  function uniqueLiveTargets(trains: any[], requestedClass: string, fallbackDate: string) {
@@ -777,7 +786,7 @@ export function TrainResultsWorkspace() {
           deferred: current.deferred,
         }));
 
-        const hydrateTarget = async (target: (typeof targets)[number]) => {
+        for (const target of targets) {
           if (requestId !== searchRequestId.current || hydrationId !== liveHydrationGeneration.current) return;
           setLiveHydration((current) => ({ ...current, current: `${target.train.trainNo} ${target.classCode}` }));
 
@@ -840,15 +849,8 @@ export function TrainResultsWorkspace() {
 	            done: Math.min(current.total, current.done + 1),
 	            rateLimited: current.rateLimited + (rateLimited ? 1 : 0),
 	          }));
-        };
 
-        const liveBatchSize = 3;
-        for (let i = 0; i < targets.length; i += liveBatchSize) {
-          if (requestId !== searchRequestId.current || hydrationId !== liveHydrationGeneration.current) return;
-          await Promise.all(targets.slice(i, i + liveBatchSize).map(hydrateTarget));
-          if (i + liveBatchSize < targets.length) {
-            await new Promise((resolve) => setTimeout(resolve, 150));
-          }
+            await new Promise((resolve) => setTimeout(resolve, 100));
         }
 
         if (requestId === searchRequestId.current && hydrationId === liveHydrationGeneration.current) {
@@ -955,23 +957,6 @@ export function TrainResultsWorkspace() {
   const selectedPreferredHub = resolveStationInput(preferredHub, preferredHubQuery);
   const showSplitResults = hasSearched || state.splitLoading || state.splits.length > 0 || state.multiSplits.length > 0;
 
-  function searchCkpDestination(code: string) {
-    const nextDate = date || todayIso();
-    setSource("CKP");
-    setSourceQuery(stationLabelFromCode("CKP"));
-    setDestination(code);
-    setDestinationQuery(stationLabelFromCode(code));
-    runSearch(undefined, {
-      source: "CKP",
-      destination: code,
-      date: nextDate,
-      classType,
-      quota,
-      preferredHub: "",
-      pushUrl: true,
-    });
-  }
-
   return (
     <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6">
       <div className={softPanel("rounded-[32px] p-5")}>
@@ -1009,39 +994,6 @@ export function TrainResultsWorkspace() {
           {allowSplit && selectedPreferredHub && selectedPreferredHub !== source && selectedPreferredHub !== destination && (
             <div className="mt-3 rounded-2xl border border-cyan-300/40 bg-cyan-50 px-4 py-3 text-sm font-bold text-cyan-900 dark:bg-cyan-300/10 dark:text-cyan-50">
               Prioritizing split journeys via {fullStationLabelFromCode(selectedPreferredHub)}.
-            </div>
-          )}
-          {showCkpRajasthanOptions && (
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-3 dark:border-white/10 dark:bg-white/6">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <span className="text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">CKP Rajasthan options</span>
-                <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500">Live seats and fares check per exact train leg</span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {CKP_RAJASTHAN_DESTINATION_OPTIONS.map((option) => {
-                  const active = destination === option.code;
-                  return (
-                    <button
-                      key={option.code}
-                      type="button"
-                      onClick={() => searchCkpDestination(option.code)}
-                      className={`flex min-h-16 items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition ${
-                        active
-                          ? "border-cyan-300 bg-cyan-50 text-cyan-950 dark:bg-cyan-300/12 dark:text-cyan-50"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-cyan-300 dark:border-white/10 dark:bg-white/6 dark:text-slate-200"
-                      }`}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-black">{option.label}</span>
-                        <span className="mt-0.5 block truncate text-[11px] font-bold text-slate-500 dark:text-slate-400">{option.note}</span>
-                      </span>
-                      <span className="shrink-0 rounded-md border border-cyan-300/40 bg-cyan-100 px-2 py-1 text-xs font-black text-cyan-800 dark:bg-cyan-300/10 dark:text-cyan-100">
-                        {option.code}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
             </div>
           )}
         </form>
@@ -1177,8 +1129,9 @@ export function TrainResultsWorkspace() {
 	                : `All options (${allOptionCount})`],
 	              ["direct", directTabLabel],
 	              ["split", state.splitLoading && visibleSplitCount === 0 ? "Split Journey (finding...)" : `Split Journey (${visibleSplitCount})`],
+                ["calendar", "📅 60-Day Calendar View"],
 	            ].map(([key, label]) => (
-              <button key={key} type="button" onClick={() => setResultMode(key as "all" | "direct" | "split" | "multi")} className={`rounded-full border px-4 py-2 text-xs font-black ${resultMode === key ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 bg-white text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300"}`}>
+              <button key={key} type="button" onClick={() => setResultMode(key as "all" | "direct" | "split" | "multi" | "calendar")} className={`rounded-full border px-4 py-2 text-xs font-black ${resultMode === key ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 bg-white text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300"}`}>
                 {label}
               </button>
             ))}
@@ -1232,6 +1185,17 @@ export function TrainResultsWorkspace() {
 
           {/* Emergency travel panel removed per request */}
 	      <div className="mt-6 space-y-4">
+        {resultMode === "calendar" && (
+          <RouteScheduleCalendar
+            source={source}
+            destination={destination}
+            activeDate={date}
+            onSelectDate={selectNearbyDate}
+            searchResultsTrains={state.trains}
+            searchResultsSplits={state.splits}
+            hasSearched={hasSearched}
+          />
+        )}
         {(resultMode === "all" || resultMode === "direct") && (
           <>
             <ResultSectionHeader title="Direct Trains" detail="Single-train journeys returned by the provider for the selected station pair/date." />
@@ -1784,6 +1748,18 @@ export function PremiumTrainCard({
     return () => { active = false; };
   }, [mapOpen, train.trainNo, mapRoute.length]);
 
+  const mapStations = useMemo(() => {
+    if (mapRoute && mapRoute.length > 0) {
+      return mapRoute.map((stop: any) => ({
+        code: stop.code || stop.stationCode,
+        name: stop.name || stop.stationName || stop.code
+      }));
+    }
+    return [
+      { code: actualSource || train.source, name: fullStationLabelFromCode(actualSource || train.source) },
+      { code: actualDestination || train.destination, name: fullStationLabelFromCode(actualDestination || train.destination) }
+    ];
+  }, [mapRoute, actualSource, actualDestination, train.source, train.destination]);
   const routeAvailable = Boolean(train.trainNo);
   const trustMeta = train.trustMeta || trustMetaFromTrain(train);
   const primaryClass = primaryClassCode(train);
@@ -1829,7 +1805,9 @@ export function PremiumTrainCard({
           )}
           <div className="mt-3 flex flex-wrap gap-2">
             <span className={`rounded-md border px-3 py-1.5 text-xs font-black ${availabilityTone(train.availability)}`}>Railway availability: {compactSeatText(train)}</span>
-            <span className={`rounded-full border px-3 py-1.5 text-xs font-black ${fareTone(liveFareText(train))}`}>Final fare: {compactFareText(liveFareText(train))}</span>
+            {compactFareText(liveFareText(train)) && !/fare unavailable|check fare/i.test(compactFareText(liveFareText(train))) && (
+              <span className={`rounded-full border px-3 py-1.5 text-xs font-black ${fareTone(liveFareText(train))}`}>Final fare: {compactFareText(liveFareText(train))}</span>
+            )}
             <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-black text-slate-600 dark:border-white/10 dark:bg-white/8 dark:text-slate-300">{primaryClass || "Class unavailable"} · IRCTC-compatible provider</span>
           </div>
           {showLiveFallbackWarning && (
@@ -1900,7 +1878,7 @@ export function PremiumTrainCard({
             </div>
 	            <div className={`rounded-2xl border p-3 text-sm font-black ${fareTone(liveFareText(train))}`}>
               <div className="text-[10px] uppercase opacity-70">Rate</div>
-	              <div className="mt-1 text-lg">{compactFareText(liveFareText(train))}</div>
+	              <div className="mt-1 text-lg">{compactFareText(liveFareText(train)) || "Check Fare"}</div>
             </div>
           </div>
           {shouldOfferLiveCheck && primaryClass && (
@@ -2075,7 +2053,7 @@ export function DirectTrainIndex({
                         ) : (
 	                          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
 	                            <span>{seatCopy}</span>
-	                            <span>Final fare: {fareCopy}</span>
+	                            {fareCopy && !/fare unavailable|check fare/i.test(fareCopy) && <span>Final fare: {fareCopy}</span>}
 	                            {chanceCopy && (
 	                              <span className={`rounded-md border px-2 py-0.5 text-[10px] ${confirmationChanceTone(seatCopy, train)}`}>
 	                                {chanceCopy}
@@ -2601,20 +2579,22 @@ export function SplitJourneyCard({
   const legTrust = legDataTrustCopy([leg1, leg2], trustMeta);
   const routeTitle = `${stationCompactLabel(actualLegSourceStation(leg1) || leg1.source)} → ${stationCompactLabel(hubCode)} → ${stationCompactLabel(actualLegDestinationStation(leg2) || leg2.destination)}`;
   const totalFareVerified = [leg1, leg2].every((leg) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
-  const leg1Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg1);
-  const leg2Class = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg2);
-  const estimatedSplitFare = estimatedFareAmount(leg1, leg1Class) + estimatedFareAmount(leg2, leg2Class);
+  const leg1RealFare = trainFareAmount(leg1) > 0 && String(leg1?.fareStatus || "").toUpperCase() === "VERIFIED" ? trainFareAmount(leg1) : 0;
+  const leg2RealFare = trainFareAmount(leg2) > 0 && String(leg2?.fareStatus || "").toUpperCase() === "VERIFIED" ? trainFareAmount(leg2) : 0;
+  const bothLegsRealFare = leg1RealFare > 0 && leg2RealFare > 0 ? leg1RealFare + leg2RealFare : 0;
+  // Only ever show a number the provider actually verified for this train/date/class.
+  // Never substitute a per-km guess as if it were a real price.
   const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
     ? formatFare(split.totalFare)
-    : estimatedSplitFare > 0
-      ? `~₹${estimatedSplitFare.toLocaleString("en-IN")} est.`
-      : "Fare unavailable";
+    : bothLegsRealFare > 0
+      ? formatFare(bothLegsRealFare)
+      : "Live fare unavailable";
 
   function selectedClassForLeg(leg: any) {
     if (classPanel && classPanel.train?.trainNo === leg.trainNo && classPanel.train?.source === leg.source && classPanel.train?.destination === leg.destination) {
       return classPanel.classCode;
     }
-    return scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
+    return scopedClass && scopedClass !== "ANY" ? scopedClass : (primaryClassCode(leg) || "3A");
   }
 
   function legFareText(leg: any, fallbackFare: unknown) {
@@ -2833,15 +2813,16 @@ export function MultiSplitJourneyCard({
   const trustMeta = trustMetaFromTrain(legs[0] || {}, { splitRoute: true });
   const legTrust = legDataTrustCopy(legs, trustMeta);
   const totalFareVerified = legs.length > 0 && legs.every((leg: any) => String(leg?.fareStatus || "").toUpperCase() === "VERIFIED");
-  const estimatedMultiFare = legs.reduce((sum: number, leg: any) => {
-    const legClass = scopedClass && scopedClass !== "ANY" ? scopedClass : primaryClassCode(leg);
-    return sum + estimatedFareAmount(leg, legClass);
-  }, 0);
+  const allLegsRealFare = legs.length > 0 && legs.every((leg: any) => trainFareAmount(leg) > 0 && String(leg?.fareStatus || "").toUpperCase() === "VERIFIED")
+    ? legs.reduce((sum: number, leg: any) => sum + trainFareAmount(leg), 0)
+    : 0;
+  // Only ever show a number the provider actually verified for this train/date/class.
+  // Never substitute a per-km guess as if it were a real price.
   const totalFareText = fareToNumber(split.totalFare) && totalFareVerified
     ? formatFare(split.totalFare)
-    : estimatedMultiFare > 0
-      ? `~₹${estimatedMultiFare.toLocaleString("en-IN")} est.`
-      : "Fare unavailable";
+    : allLegsRealFare > 0
+      ? formatFare(allLegsRealFare)
+      : "Live fare unavailable";
 
   function isSelectedRouteLeg(leg: any) {
     return Boolean(
@@ -2940,3 +2921,4 @@ export function MultiSplitJourneyCard({
     </article>
   );
 }
+

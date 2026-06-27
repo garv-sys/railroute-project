@@ -266,11 +266,11 @@ export function lookupStatusLabel(status: LookupTrustStatus | undefined, kind: "
   const code = classCode ? ` for ${classCode}` : "";
   const detail = String(reason || "").trim();
   if (status === "VERIFIED") return kind === "fare" ? "Provider returned fare for this exact request" : `Provider returned availability${code} for this exact request`;
-  if (status === "NOT_CHECKED") return kind === "fare" ? "Estimated fare shown" : `Tap to check seats${code}`;
-  if (status === "RATE_LIMITED") return kind === "fare" ? "Estimated fare shown" : `Check seats${code}`;
-  if (status === "CACHE_ONLY") return kind === "fare" ? "Estimated fare shown" : `Tap to check seats${code}`;
+  if (status === "NOT_CHECKED") return kind === "fare" ? "Live fare not requested yet" : `Tap to check seats${code}`;
+  if (status === "RATE_LIMITED") return kind === "fare" ? "Live fare check queued" : `Check seats${code}`;
+  if (status === "CACHE_ONLY") return kind === "fare" ? "Cached schedule only; fare not live-verified" : `Tap to check seats${code}`;
   if (detail && !/live data unavailable|live fare unavailable|rate.?limit|too many requests|429|provider did not return/i.test(detail)) return detail;
-  return kind === "fare" ? "Estimated fare shown" : `Tap to check seats${code}`;
+  return kind === "fare" ? "Live fare unavailable" : `Tap to check seats${code}`;
 }
 
 export function trainAvailabilityStatus(train: any, classCode?: string): LookupTrustStatus {
@@ -512,8 +512,8 @@ export function estimatedFareAmount(train: any, classCode: string) {
 }
 
 export function estimatedFareText(train: any, classCode: string) {
-  const amount = estimatedFareAmount(train, classCode);
-  return amount > 0 ? `~₹${amount.toLocaleString("en-IN")} est.` : "Fare unavailable";
+  // Never show estimated/guessed fares to users — only real verified fares
+  return "Fare unavailable";
 }
 
 export function liveSeatText(train: any) {
@@ -526,8 +526,6 @@ export function liveFareText(train: any) {
   const fare = fareToNumber(train?.fare);
   const status = trainFareStatus(train);
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
-  const fallbackAmount = estimatedFareAmount(train, train?.classType || primaryClassCode(train));
-  if (fallbackAmount > 0) return formatFare(fallbackAmount);
   return "Fare unavailable";
 }
 
@@ -579,7 +577,9 @@ export function fareBreakdownRows(breakdown: any, fallbackTotal: number) {
 }
 
 export function FareBreakdownPanel({ train, classCode, fare }: { train: any; classCode: string; fare: string }) {
-  const total = fareToNumber(fare) || classFareAmount(train, classCode);
+  const verifiedFare = fareToNumber(fare);
+  // Only use verified fare - never show estimated amounts
+  const total = verifiedFare;
   const breakdown = classFareBreakdown(train, classCode);
   const rows = fareBreakdownRows(breakdown, total);
   const hasItemizedRows = rows.length > 1;
@@ -590,10 +590,10 @@ export function FareBreakdownPanel({ train, classCode, fare }: { train: any; cla
         <div>
           <div className="text-[11px] font-black uppercase text-slate-400">Fare breakdown</div>
           <div className="mt-1 text-sm font-bold text-slate-500 dark:text-slate-400">
-            {estimated ? "Estimated fare only; live itemized fare was not returned." : hasItemizedRows ? "Provider itemized this fare." : "Provider returned the total fare only."}
+            {estimated ? "Live fare unavailable for this exact train/date/class/quota." : hasItemizedRows ? "Provider itemized this fare." : "Provider returned the total fare only."}
           </div>
         </div>
-        {total > 0 && <span className="rounded-md border border-emerald-300/40 bg-emerald-50 px-3 py-1.5 text-sm font-black text-emerald-800 dark:bg-emerald-300/10 dark:text-emerald-100">{estimated ? fare : formatFare(total)}</span>}
+        {total > 0 && !estimated && <span className="rounded-md border border-emerald-300/40 bg-emerald-50 px-3 py-1.5 text-sm font-black text-emerald-800 dark:bg-emerald-300/10 dark:text-emerald-100">{formatFare(total)}</span>}
       </div>
       {rows.length > 0 ? (
         <div className="mt-3 divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200 bg-white dark:divide-white/10 dark:border-white/10 dark:bg-black/20">
@@ -635,7 +635,8 @@ export function liveDataUnavailableWarning(train: any, classCode?: string) {
 
 export function compactFareText(value: unknown) {
   const text = String(value || "").trim();
-  if (/^~?₹[\d,]+\s*est\./i.test(text)) return text;
+  // Never show estimated/guessed fares (~₹ est.) — show nothing instead
+  if (/^~?₹[\d,]+\s*est\./i.test(text)) return "";
   if (/not requested|check fare|tap class/i.test(text)) return "Check Fare";
   return formatFare(value);
 }
@@ -717,8 +718,6 @@ export function classFareText(train: any, classCode: string) {
   const fare = fareToNumber(first?.fare);
   const status = first?.fareStatus || "PROVIDER_UNAVAILABLE";
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
-  const fallbackAmount = estimatedFareAmount(train, classCode);
-  if (fallbackAmount > 0) return formatFare(fallbackAmount);
   return "Fare unavailable";
 }
 
@@ -1180,13 +1179,8 @@ export function splitRouteStableKey(split: any) {
   const leg1 = split.leg1 || {};
   const leg2 = split.leg2 || {};
   return [
-    split.hubStation || actualLegDestinationStation(leg1) || actualLegSourceStation(leg2),
-    actualLegSourceStation(leg1) || leg1.source,
-    actualLegDestinationStation(leg1) || leg1.destination,
     leg1.trainNo,
     leg1.departureDate || leg1.journeyDate,
-    actualLegSourceStation(leg2) || leg2.source,
-    actualLegDestinationStation(leg2) || leg2.destination,
     leg2.trainNo,
     leg2.departureDate || leg2.journeyDate,
   ].map((value) => String(value || "").toUpperCase()).join("|");
@@ -1384,3 +1378,4 @@ export function groupSeatsForClass(classType: string, seats: ReturnType<typeof b
     seats: seats.slice(index * size, index * size + size),
   }));
 }
+
