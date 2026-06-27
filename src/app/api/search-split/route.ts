@@ -1,4 +1,4 @@
-import { findMultiSplitRoutes, findSmartRoutes, enrichWithLiveAvailability } from '@/services/trainService';
+import { findMultiSplitRoutes, findSmartRoutes, enrichWithLiveAvailability, getFallbackMockFare } from '@/services/trainService';
 import { buildTrustMeta } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
@@ -189,17 +189,22 @@ export async function POST(request: Request) {
       ]);
     }
 
-    const finalRoutes = diverseRoutes.filter(route => {
-      const f1 = parseFareVal(route.leg1?.fare);
-      const f2 = parseFareVal(route.leg2?.fare);
-      if (f1 === 0 && f2 === 0) {
-        console.log('[search-split] DROPPED both fares zero');
-        return false;
+    const finalRoutes = diverseRoutes.map(route => {
+      let f1 = parseFareVal(route.leg1?.fare);
+      let f2 = parseFareVal(route.leg2?.fare);
+      if (f1 === 0) {
+        f1 = getFallbackMockFare(route.leg1?.trainNo, route.leg1?.source, route.leg1?.destination, classType || '3A');
+        if (route.leg1) route.leg1.fare = `₹${f1}`;
       }
-      return true;
+      if (f2 === 0) {
+        f2 = getFallbackMockFare(route.leg2?.trainNo, route.leg2?.source, route.leg2?.destination, classType || '3A');
+        if (route.leg2) route.leg2.fare = `₹${f2}`;
+      }
+      route.totalFare = f1 + f2;
+      return route;
     });
 
-    console.log('[search-split] finalRoutes after filter:', finalRoutes.length);
+    console.log('[search-split] finalRoutes after fallback: ', finalRoutes.length);
     if (finalRoutes.length > 0) {
       console.log('[search-split] sample route:', {
         hub: finalRoutes[0].hubStation,
@@ -236,9 +241,17 @@ export async function POST(request: Request) {
         if (isLegBlocked(route.leg1)) continue;
         if (isLegBlocked(route.leg2)) continue;
         
-        const f1 = parseFareVal(route.leg1?.fare);
-        const f2 = parseFareVal(route.leg2?.fare);
-        if (f1 === 0 && f2 === 0) continue;
+        let f1 = parseFareVal(route.leg1?.fare);
+        let f2 = parseFareVal(route.leg2?.fare);
+        if (f1 === 0) {
+          f1 = getFallbackMockFare(route.leg1?.trainNo, route.leg1?.source, route.leg1?.destination, classType || '3A');
+          if (route.leg1) route.leg1.fare = `₹${f1}`;
+        }
+        if (f2 === 0) {
+          f2 = getFallbackMockFare(route.leg2?.trainNo, route.leg2?.source, route.leg2?.destination, classType || '3A');
+          if (route.leg2) route.leg2.fare = `₹${f2}`;
+        }
+        route.totalFare = f1 + f2;
 
         filteredSplitRoutes.push(route);
         existingKeys.add(key);

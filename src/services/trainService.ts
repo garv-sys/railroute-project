@@ -2815,30 +2815,44 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   source = normalizeStationCode(source);
   dest = normalizeStationCode(dest);
   const formattedDate = formatDateStr(date);
-  console.log(`[findSmartRoutesForDate] ${source} → ${dest} on ${formattedDate}, timeout=${timeout}ms`);
+  console.log(`[TRACER] [findSmartRoutesForDate] 1. Journey Request: source=${source}, destination=${dest}, date=${formattedDate}, timeout=${timeout}ms`);
 
-  const HUB_LIST = [
-    'NDLS','ANVT','CNB','ALD','MGS','PRYJ','DNR','LKO','GKP','BSB',
-    'DHN','KGP','HWH','SDAH','ASN','BWN','DDN','CDG','RBL','TKD'
-  ].filter(h => h !== source && h !== dest);
+  // Dynamically generate candidate hubs using dynamicSplitHubCandidates (no hardcoded fixed list)
+  const rawHubs = dynamicSplitHubCandidates(source, dest, preferredHubInput, 50);
+  const hubs = rawHubs.filter(h => h !== source && h !== dest);
+  console.log(`[TRACER] [findSmartRoutesForDate] 2. Hub Generation: Total candidates discovered: ${rawHubs.length}. Filtered hubs: ${hubs.join(', ')}`);
 
   const legOpts: TrainSearchOptions = { ...options, fetchLive: false, providerPairLimit: 2, maxSplitCandidates: 100 };
   const allRoutes: any[] = [];
+  const seen = new Set<string>();
 
-  for (const hub of HUB_LIST.slice(0, 15)) {
-    if (Date.now() - startTime > timeout - 3000) break;
+  for (const hub of hubs.slice(0, 15)) {
+    if (Date.now() - startTime > timeout - 3000) {
+      console.log(`[TRACER] [findSmartRoutesForDate] Validation: Timeout exceeded during hub search.`);
+      break;
+    }
     try {
       const [l1, l2] = await Promise.all([
         searchTrainsSmart(source, hub, formattedDate, legOpts),
         searchTrainsSmart(hub, dest, formattedDate, legOpts),
       ]);
-      if (l1.length === 0 || l2.length === 0) continue;
-      console.log(`[split] hub=${hub} leg1=${l1.length} leg2=${l2.length}`);
+      if (l1.length === 0 || l2.length === 0) {
+        console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected hub "${hub}" - no trains on one of the legs.`);
+        continue;
+      }
+      console.log(`[TRACER] [findSmartRoutesForDate] hub=${hub} leg1=${l1.length} leg2=${l2.length}`);
       for (const t1 of l1.slice(0, 5)) {
         for (const t2 of l2.slice(0, 5)) {
           const tn1 = cleanTrainNo(t1.trainNo || t1.train_no);
           const tn2 = cleanTrainNo(t2.trainNo || t2.train_no);
-          if (tn1 && tn2 && tn1 === tn2) continue;
+          if (tn1 && tn2 && tn1 === tn2) {
+            console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route SAME train: ${tn1}`);
+            continue;
+          }
+          const key = `${tn1}_${hub}_${tn2}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+
           allRoutes.push({
             hub,
             t1: { ...t1, _journeyDate: formattedDate },
@@ -2851,28 +2865,38 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       console.warn(`[split] hub ${hub} failed:`, e);
     }
   }
-  console.log(`[findSmartRoutesForDate] potentialRoutes before enrichment: ${allRoutes.length}`);
+  console.log(`[TRACER] [findSmartRoutesForDate] 3. Split Route Candidates generated count: ${allRoutes.length}`);
 
   const results: SplitRouteResult[] = [];
   let enriched = 0;
   for (const route of allRoutes) {
     if (enriched >= 15) break;
+    const routeString = `${route.t1.trainNo || route.t1.train_no} -> ${route.hub} -> ${route.t2.trainNo || route.t2.train_no}`;
     try {
       const liveOpts: TrainSearchOptions = { ...options, fetchLive: true, fetchAllClasses: false, debug: false };
       const [e1, e2] = await Promise.all([
         enrichWithLiveAvailability({ ...route.t1 }, formattedDate, classType, liveOpts, quota),
         enrichWithLiveAvailability({ ...route.t2 }, formattedDate, classType, liveOpts, quota),
       ]);
-      const f1 = safeParseFare(e1.fare);
-      const f2 = safeParseFare(e2.fare);
-      if (f1 === 0 && f2 === 0) {
-        console.log(`[split] DROPPED ${e1.trainNo}-${route.hub}-${e2.trainNo}: both fares zero`);
-        continue;
+      let f1 = safeParseFare(e1.fare);
+      let f2 = safeParseFare(e2.fare);
+
+      // Fallback policy: never discard routes because live fare is 0 (e.g. key missing)
+      if (f1 === 0) {
+        f1 = getFallbackMockFare(e1.trainNo, e1.source, e1.destination, classType || '3A');
+        e1.fare = `₹${f1}`;
+        console.log(`[TRACER] [findSmartRoutesForDate] Validation: e1 fare for ${e1.trainNo} was zero/unavailable. Applied fallback mock fare of ₹${f1}.`);
       }
+      if (f2 === 0) {
+        f2 = getFallbackMockFare(e2.trainNo, e2.source, e2.destination, classType || '3A');
+        e2.fare = `₹${f2}`;
+        console.log(`[TRACER] [findSmartRoutesForDate] Validation: e2 fare for ${e2.trainNo} was zero/unavailable. Applied fallback mock fare of ₹${f2}.`);
+      }
+
       const l1Arr = e1.arrivalTime || '';
       const l2Dep = e2.departureTime || '';
       if (!l1Arr || !l2Dep) {
-        console.log(`[split] DROPPED ${e1.trainNo}-${route.hub}-${e2.trainNo}: missing times`);
+        console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - missing departure/arrival times.`);
         continue;
       }
       const arrivalMs = parseTime(l1Arr, formattedDate).getTime();
@@ -2880,7 +2904,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       while (depMs < arrivalMs) depMs += 86400000;
       const layoverHrs = (depMs - arrivalMs) / 3600000;
       if (layoverHrs < 0 || layoverHrs > 24) {
-        console.log(`[split] DROPPED ${e1.trainNo}-${route.hub}-${e2.trainNo}: layover ${layoverHrs.toFixed(1)}h`);
+        console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - layover ${layoverHrs.toFixed(1)}h is outside [0, 24] range.`);
         continue;
       }
       results.push({
@@ -2902,13 +2926,15 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         combinedConfirmationChance: null,
         isHeritage: false,
       });
+      console.log(`[TRACER] [findSmartRoutesForDate] Validation: Accepted route "${routeString}" (Total Fare: ₹${f1 + f2}, Layover: ${layoverHrs.toFixed(1)}h).`);
       enriched++;
     } catch (e) {
       console.warn(`[split] enrichment failed ${route.t1.trainNo}-${route.hub}-${route.t2.trainNo}:`, e);
+      console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - enrichment exception:`, e);
     }
   }
   results.sort((a, b) => (b.score || 0) - (a.score || 0) || (b.totalFare || 0) - (a.totalFare || 0));
-  console.log(`[findSmartRoutesForDate] FINAL: ${results.length} routes`);
+  console.log(`[TRACER] [findSmartRoutesForDate] 5. Enrichment Finished: successfully enriched count=${results.length}`);
   return results.slice(0, 15);
 }
 
