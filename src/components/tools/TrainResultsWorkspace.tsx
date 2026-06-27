@@ -90,7 +90,7 @@ import {
 } from "../shared/utils";
 import { LoadingBlock } from "../shared/LoadingBlock";
 import { TrustSummary, QuotaTimingNotice, RunningDaysStrip, primaryClassCode, resolveClassCode, classAvailabilityStatus, compactSeatText, classAvailabilityText, returnedClassesForTrain, liveFareText, compactFareText, fareTone, availabilityTone, readableRailStatus, fareToNumber, durationToMinutes, splitTotalDuration, splitLayoverMinutes, classFareAmount, trainFareAmount, timeToMinutes, multiSplitLayoverMinutes, actualLegSourceStation, actualLegDestinationStation, trainNumberName, isSeatAvailable, splitHasVerifiedFareAndSeats, formatFare, formatDurationLong, multiSplitHasVerifiedFareAndSeats, classFareText, classDataSourceLabel, debugModeEnabled, providerMarkedSelectedClassUnavailable, hasVerifiedFareAndSeat, dedupeSplitRoutes, isLongJourneyStationPair, splitRouteStableKey, splitAutoLiveRouteCountForJourney, liveSourceStation, liveDestinationStation, trainJourneyDate, needsLiveQuotaRefresh, type LiveClassQuote, applyLiveQuoteToTrain, liveQuoteFromResponse, isProviderDelay, providerDelayCopy, providerIssueCopy, lookupStatusLabel, fullStationLabelFromCode, SearchResultSummary, ResultSectionHeader, displayClassesForTrain, classCalendarFor, legUsesAlternateTerminal, nearbyTerminalDistanceSummary, requestedSourceStation, requestedDestinationStation, isUnavailableRailStatus, normalizedClassList, liveDataUnavailableWarning, ticketDecision, compactDebugJson, ExpectedPlatformPair, confirmationChanceLabel, confirmationChanceTone, PlatformPairSummary, platformDisplay, FareBreakdownPanel, availabilityCardTone, legDataTrustCopy, estimatedFareAmount, selectedClassCanBeChecked, providerBookingBlockedText, stationCompactLabelWithDistance } from "../shared/TrustSummary";
-import { StationAutocomplete, RelatedStationChips, QuickSearch, resolveStationInput, splitBestRankScore, splitAvailabilityScore, multiSplitBestRankScore, DateQuickField, NearbyDateSuggestions } from "../shared/StationAutocomplete";
+import { StationAutocomplete, RelatedStationChips, QuickSearch, resolveStationInput, splitBestRankScore, splitAvailabilityScore, multiSplitBestRankScore, DateQuickField, NearbyDateSuggestions, splitEmergencyRankScore, multiEmergencyRankScore } from "../shared/StationAutocomplete";
 import { ProductShell } from "../layout/ProductShell";
 import { ToolHeader } from "../layout/ToolHeader";
 import { CoachExplorer } from "./CoachExplorer";
@@ -291,7 +291,7 @@ export function TrainResultsWorkspace() {
           (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity) ||
           (fareA || Infinity) - (fareB || Infinity);
       }
-      return splitBestRankScore(b, selectedSortClass) - splitBestRankScore(a, selectedSortClass) ||
+      return splitEmergencyRankScore(b, selectedSortClass) - splitEmergencyRankScore(a, selectedSortClass) ||
         splitAvailabilityScore(a, selectedSortClass) - splitAvailabilityScore(b, selectedSortClass) ||
         (fareA || Infinity) - (fareB || Infinity) ||
         (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity);
@@ -437,7 +437,7 @@ export function TrainResultsWorkspace() {
           (durationToMinutes(a.totalDuration) || Infinity) - (durationToMinutes(b.totalDuration) || Infinity) ||
           (fareA || Infinity) - (fareB || Infinity);
       }
-      return multiSplitBestRankScore(b, selectedSortClass) - multiSplitBestRankScore(a, selectedSortClass) ||
+      return multiEmergencyRankScore(b, selectedSortClass) - multiEmergencyRankScore(a, selectedSortClass) ||
         (b.score || 0) - (a.score || 0);
     });
   }, [maxDuration, maxFare, selectedSortClass, sortBy, state.multiSplits, confirmedOnly]);
