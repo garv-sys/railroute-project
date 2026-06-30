@@ -2881,7 +2881,7 @@ function SplitResultsPanel({
   classType: string;
   quota: string;
 }) {
-  const [visibleLimit, setVisibleLimit] = useState(5);
+  const [visibleLimit, setVisibleLimit] = useState(10);
   const [readyKeys, setReadyKeys] = useState<Set<string>>(new Set());
   const [validKeys, setValidKeys] = useState<Set<string>>(new Set());
   const handleReady = useCallback((key: string, isValid?: boolean) => {
