@@ -262,6 +262,14 @@ export async function POST(request: Request) {
     }
 
     filteredSplitRoutes = filteredSplitRoutes.slice(0, 15);
+    // Final ranking: highest confirmation chance first, then score, then lowest fare
+    filteredSplitRoutes.sort((a: any, b: any) => {
+      const chanceDiff = (b.combinedConfirmationChance ?? 0) - (a.combinedConfirmationChance ?? 0);
+      if (chanceDiff !== 0) return chanceDiff;
+      const scoreDiff = (b.score ?? 0) - (a.score ?? 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return (a.totalFare ?? 0) - (b.totalFare ?? 0);
+    });
     console.log('[search-split] FINAL filteredSplitRoutes:', filteredSplitRoutes.length);
 
     const LIVE_TOP_MULTI = mode === 'quick' ? 0 : Math.min(15, multiSplitRoutes.length);
