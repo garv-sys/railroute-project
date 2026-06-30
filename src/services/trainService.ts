@@ -2627,10 +2627,9 @@ export async function generateSplitCandidates(
       console.log(`[TRACER] Validation: Timeout exceeded during hub search.`);
       break;
     }
-    if (candidates.length >= limit * 4) {
-      console.log(`[TRACER] Validation: Candidates limit reached (gathering completed).`);
-      break;
-    }
+    // Per-hub contribution cap: each hub contributes at most 8 candidates
+    // to ensure we keep exploring many diverse hubs rather than stopping early
+    const hubContributions = new Map<string, number>();
     try {
       const [l1, l2] = await Promise.all([
         searchTrainsSmart(source, hub, formattedDate, legOpts),
@@ -2659,12 +2658,16 @@ export async function generateSplitCandidates(
             console.log(`[TRACER] Validation: Rejected route "${routeString}" - SAME train used for both legs.`);
             continue;
           }
-          const key = `${tn1}_${tn2}`;
+          const key = `${tn1}_${hub}_${tn2}`;
           if (seen.has(key)) {
             console.log(`[TRACER] Validation: Rejected route "${routeString}" - DUPLICATE train combination.`);
             continue;
           }
           seen.add(key);
+          // Per-hub cap: skip if this hub already contributed too many
+          const hubContrib = hubContributions.get(hub) || 0;
+          if (hubContrib >= 8) continue;
+          hubContributions.set(hub, hubContrib + 1);
 
           // Rough layover estimate
           const dep1 = rawTrainDeparture(t1) || '';
@@ -2887,11 +2890,13 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         l1 = await searchTrainsSmart(source, hub, formattedDate, legOpts);
         l2 = await searchTrainsSmart(hub, dest, formattedDate, legOpts);
 
-        if (l1.length === 0 && hubIndex < 4) {
+        // Always try live fallback for any hub where local search returns 0 results.
+        // This ensures stations with no local data (AWR, UDZ, BHL etc.) still get coverage.
+        if (l1.length === 0) {
           console.log(`[split-hybrid] Local search returned 0 for ${source}->${hub}, running live fallback...`);
           l1 = await searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true });
         }
-        if (l2.length === 0 && hubIndex < 4) {
+        if (l2.length === 0) {
           console.log(`[split-hybrid] Local search returned 0 for ${hub}->${dest}, running live fallback...`);
           l2 = await searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true });
         }
@@ -2902,17 +2907,23 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         continue;
       }
       console.log(`[TRACER] [findSmartRoutesForDate] hub=${hub} leg1=${l1.length} leg2=${l2.length}`);
-      for (const t1 of l1.slice(0, 5)) {
-        for (const t2 of l2.slice(0, 5)) {
+
+      // Per-hub diversity cap: each hub contributes at most 5 candidates to final pool
+      const hubCap = 5;
+      let hubContrib = 0;
+      for (const t1 of l1.slice(0, 8)) {
+        for (const t2 of l2.slice(0, 8)) {
+          if (hubContrib >= hubCap) break;
           const tn1 = cleanTrainNo(t1.trainNo || t1.train_no);
           const tn2 = cleanTrainNo(t2.trainNo || t2.train_no);
           if (tn1 && tn2 && tn1 === tn2) {
             console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route SAME train: ${tn1}`);
             continue;
           }
-          const key = `${tn1}_${tn2}`;
+          const key = `${tn1}_${hub}_${tn2}`;
           if (seen.has(key)) continue;
           seen.add(key);
+          hubContrib++;
 
           allRoutes.push({
             hub,
