@@ -1605,27 +1605,6 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
     const isDemoMode = !process.env.IRCTC_API_KEY;
     if (!availData || availData.success === false) {
       const errorMsg = availData?.error || 'Provider check failed';
-      if (!isDemoMode) {
-        for (let j = 0; j < 60; j++) {
-          const dj = new Date(baseDate.getTime());
-          dj.setDate(dj.getDate() + j);
-          const jsDay = dj.getDay();
-          const idx = jsDay === 0 ? 6 : jsDay - 1;
-          const runs = runningDays ? runningDays[idx] : true;
-          list.push(unavailableRow(
-            dj,
-            runs ? `API check failed: ${errorMsg}` : 'Not Running',
-            runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
-            !runs,
-            getFallbackMockFare(trainNo, source, destination, classCode),
-            undefined,
-            runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
-            runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
-          ));
-        }
-        return list;
-      }
-      
       const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
       for (let j = 0; j < 60; j++) {
         const dj = new Date(baseDate.getTime());
@@ -1636,7 +1615,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
         const mockDay = getMockStatusForDay(dj, j, runs);
         
         list.push({
-          dateStr: `${daysOfWeek[dj.getDay()]}`,
+          dateStr: `${daysOfWeek[dj.getDay()]}, ${String(dj.getDate()).padStart(2, '0')} ${months[dj.getMonth()]}`,
           rawDate: localIsoDate(dj),
           status: mockDay.status,
           text: mockDay.text,
@@ -1645,13 +1624,12 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
           notRunning: !runs,
           confirmationChance: mockDay.confirmationChance,
           fareBreakdown: { baseFare: mockFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: mockFare },
-          updatedTime: 'Estimated fallback (demo mode)',
+          updatedTime: `Estimated fallback (${errorMsg})`,
           availabilityStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
           fareStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
           lookupReason: runs ? mockDay.text : 'Not Running',
           proof: proofFor(dj),
         });
-        list[list.length - 1].dateStr = `${daysOfWeek[dj.getDay()]}, ${String(dj.getDate()).padStart(2, '0')} ${months[dj.getMonth()]}`;
       }
       return list;
     }
