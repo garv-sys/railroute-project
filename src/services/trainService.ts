@@ -190,6 +190,9 @@ type TrainSearchOptions = {
   plannerLegTimeoutMs?: number;
   globalTimeoutMs?: number;
   fetchAllClasses?: boolean;
+  maxHubs?: number;
+  minLayoverMins?: number;
+  maxLayoverMins?: number;
 };
 
 export interface SplitRouteResult {
@@ -3004,10 +3007,12 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
   dest = normalizeStationCode(dest);
   const preferredHub = normalizeStationCode(preferredHubInput);
   const hasPreferredHub = Boolean(preferredHub && preferredHub !== source && preferredHub !== dest);
-  const multiPlanLimit = quickLimit(options, options.maxMultiPlans, hasPreferredHub ? 25 : 20);
-  const multiLegLimit = quickLimit(options, options.maxMultiLegOptions, 8);
-  const multiCandidateLimit = quickLimit(options, options.maxMultiCandidates, 200);
+
   const multiResultLimit = quickLimit(options, options.maxMultiResults, 20);
+  const maxHubs = options.maxHubs ?? 3;
+  const minLayoverMins = options.minLayoverMins ?? 30;
+  const maxLayoverMins = options.maxLayoverMins ?? 480;
+
   const legSearchOptions: TrainSearchOptions = {
     ...options,
     providerPairLimit: 3,
@@ -3015,96 +3020,160 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
 
   try {
     const formattedDate = formatDateStr(date);
-    const routeHubs = dynamicSplitHubCandidates(source, dest, preferredHub, multiPlanLimit * 4);
-    const sourceCoord = stationCoordinatesForRouting(source);
-    const destCoord = stationCoordinatesForRouting(dest);
-    const hubProgress = (code: string) => {
-      const hub = MAJOR_HUB_BY_CODE.get(normalizeStationCode(code));
-      if (!sourceCoord || !destCoord || !hub) return 0.5;
-      return hubRouteProgress(sourceCoord, destCoord, { lat: hub.lat, lon: hub.lon });
-    };
-    const firstHubs = takeForCoverage(
-      routeHubs
-        .filter((hub) => hub !== source && hub !== dest && hubProgress(hub) < 0.68)
-        .sort((a, b) => hubProgress(a) - hubProgress(b)),
-      multiPlanLimit
-    );
-    const secondHubs = takeForCoverage(
-      routeHubs
-        .filter((hub) => hub !== source && hub !== dest && hubProgress(hub) > 0.32)
-        .sort((a, b) => hubProgress(a) - hubProgress(b)),
-      multiPlanLimit
-    );
+    const routeHubs = dynamicSplitHubCandidates(source, dest, preferredHub, 40);
+    const hubs = routeHubs.filter((hub) => hub !== source && hub !== dest);
 
-    const plans: { h1: string; h2: string }[] = [];
-    for (const h1 of firstHubs) {
-      for (const h2 of secondHubs) {
-        if (h1 !== h2 && (!sourceCoord || !destCoord || hubProgress(h1) < hubProgress(h2))) plans.push({ h1, h2 });
-      }
+    const legCache = new Map<string, any[]>();
+
+    // Parallel pre-population of live searches for the first/last legs of the top 10 hubs to prevent DFS latency
+    const topPrefetchHubs = hubs.slice(0, 10);
+    const prefetchPromises: Promise<void>[] = [];
+
+    for (const hub of topPrefetchHubs) {
+      prefetchPromises.push(
+        (async () => {
+          try {
+            const trains = await searchTrainsSmart(source, hub, formattedDate, { ...legSearchOptions, fetchLive: true });
+            legCache.set(`${source}_${hub}`, trains);
+          } catch {}
+        })()
+      );
+      prefetchPromises.push(
+        (async () => {
+          try {
+            const trains = await searchTrainsSmart(hub, dest, formattedDate, { ...legSearchOptions, fetchLive: true });
+            legCache.set(`${hub}_${dest}`, trains);
+          } catch {}
+        })()
+      );
+    }
+
+    // Run prefetches concurrently
+    await Promise.all(prefetchPromises);
+
+    async function getCachedLeg(u: string, v: string) {
+      const key = `${u}_${v}`;
+      if (legCache.has(key)) return legCache.get(key)!;
+
+      const res = await searchTrainsSmart(u, v, formattedDate, { ...legSearchOptions, fetchLive: false });
+      legCache.set(key, res);
+      return res;
     }
 
     const potentialRoutes: any[] = [];
+    const destCoord = stationCoordinatesForRouting(dest);
 
-    for (const plan of takeForCoverage(Array.from(new Map(plans.map((plan) => [`${plan.h1}_${plan.h2}`, plan])).values()), multiPlanLimit)) {
-      try {
-        const [leg1Options, leg2Options, leg3Options] = await Promise.all([
-          searchTrainsSmart(source, plan.h1, formattedDate, legSearchOptions),
-          searchTrainsSmart(plan.h1, plan.h2, formattedDate, legSearchOptions),
-          searchTrainsSmart(plan.h2, dest, formattedDate, legSearchOptions),
-        ]);
+    async function dfs(
+      current: string,
+      currentPath: any[],
+      visited: Set<string>
+    ) {
+      if (current === dest) {
+        if (currentPath.length >= 3) {
+          const trains = currentPath.map((p) => p.train);
+          const pathHubs = currentPath.slice(0, -1).map((p) => p.to);
+          const layovers = currentPath.slice(0, -1).map((_, i) => {
+            const prev = currentPath[i];
+            const next = currentPath[i + 1];
+            const durationMs = next.depTime - prev.arrTime;
+            return {
+              station: prev.to,
+              duration: formatDuration(durationMs),
+              hours: durationMs / (1000 * 60 * 60),
+            };
+          });
+          const totalDurationMs = currentPath[currentPath.length - 1].arrTime - currentPath[0].depTime;
 
-        if (!leg1Options.length || !leg2Options.length || !leg3Options.length) continue;
+          potentialRoutes.push({
+            trains,
+            hubs: pathHubs,
+            layovers,
+            layoverHours: layovers.map((l) => l.hours),
+            layoverDurations: layovers.map((l) => l.duration),
+            rawTotalMs: totalDurationMs,
+            totalDurationMins: totalDurationMs / (1000 * 60),
+          });
+        }
+        return;
+      }
 
-        const uniqueTrainNos = Array.from(new Set([
-          ...leg1Options.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)),
-          ...leg2Options.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)),
-          ...leg3Options.map(t => cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno))
-        ].filter(Boolean)));
+      if (currentPath.length >= maxHubs + 1) {
+        return;
+      }
 
-        const directStatusMap = new Map<string, boolean>();
-        await Promise.all(uniqueTrainNos.map(async (num) => {
-          const isDirect = await isDirectTrainEver(num, source, dest);
-          directStatusMap.set(num, isDirect);
-        }));
+      const candidates = [...hubs, dest];
+      for (const nextStation of candidates) {
+        if (visited.has(nextStation)) continue;
 
-        const filteredL1 = leg1Options.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
-        const filteredL2 = leg2Options.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
-        const filteredL3 = leg3Options.filter(t => !directStatusMap.get(cleanTrainNo(t.trainNo || t.train_no || t.train_number || t.trainno)));
+        const currentCoord = stationCoordinatesForRouting(current);
+        const nextCoord = stationCoordinatesForRouting(nextStation);
+        if (currentCoord && nextCoord && destCoord) {
+          const currentDist = haversineKm(currentCoord, destCoord);
+          const nextDist = haversineKm(nextCoord, destCoord);
+          if (nextDist > currentDist * 1.15) continue;
+        }
 
-        if (!filteredL1.length || !filteredL2.length || !filteredL3.length) continue;
+        const trains = await getCachedLeg(current, nextStation);
+        if (!trains || trains.length === 0) continue;
 
-        for (const t1 of pickLikelyTrains(filteredL1, multiLegLimit)) {
-          for (const t2 of pickLikelyTrains(filteredL2, multiLegLimit)) {
-            for (const t3 of pickLikelyTrains(filteredL3, multiLegLimit)) {
-              if (rawTrainDestination(t1) !== rawTrainSource(t2) || rawTrainDestination(t2) !== rawTrainSource(t3)) continue;
+        const validTimeTrains = [];
+        for (const train of trains) {
+          const dep = normalizeLegTime(rawTrainDeparture(train), formattedDate);
+          const arr = normalizeLegTime(rawTrainArrival(train), formattedDate, dep);
 
-              const arr1 = normalizeLegTime(rawTrainArrival(t1), formattedDate);
-              const dep2 = normalizeLegTime(rawTrainDeparture(t2), formattedDate, arr1);
-              const arr2 = normalizeLegTime(rawTrainArrival(t2), formattedDate, dep2);
-              const dep3 = normalizeLegTime(rawTrainDeparture(t3), formattedDate, arr2);
-              const arr3 = normalizeLegTime(rawTrainArrival(t3), formattedDate, dep3);
-              const layover1 = (dep2 - arr1) / (1000 * 60 * 60);
-              const layover2 = (dep3 - arr2) / (1000 * 60 * 60);
+          let validLayover = true;
+          let prevArrTime = 0;
+          let layoverMins = 0;
 
-              if (layover1 < 0.75 || layover2 < 0.75 || layover1 > 7 || layover2 > 7) continue;
+          if (currentPath.length > 0) {
+            const prevLeg = currentPath[currentPath.length - 1];
+            prevArrTime = prevLeg.arrTime;
+            const layoverMs = dep - prevArrTime;
+            layoverMins = layoverMs / (1000 * 60);
 
-              potentialRoutes.push({
-                trains: [t1, t2, t3],
-                hubs: [plan.h1, plan.h2],
-                layoverHours: [layover1, layover2],
-                layoverDurations: [formatDuration(dep2 - arr1), formatDuration(dep3 - arr2)],
-                rawTotalMs: arr3 - normalizeLegTime(rawTrainDeparture(t1), formattedDate),
-              });
+            if (layoverMins < minLayoverMins || layoverMins > maxLayoverMins) {
+              validLayover = false;
             }
           }
+
+          if (validLayover) {
+            validTimeTrains.push({ train, dep, arr, layoverMins });
+          }
         }
-      } catch {
-        console.warn(`[Multi Split] Skipped ${source}->${plan.h1}->${plan.h2}->${dest} due to missing data.`);
+
+        const sortedValid = validTimeTrains.sort((a, b) => {
+          const aDaily = (a.train.running_days === '1111111' || a.train.runsOn === '1111111') ? 1 : 0;
+          const bDaily = (b.train.running_days === '1111111' || b.train.runsOn === '1111111') ? 1 : 0;
+          if (bDaily !== aDaily) return bDaily - aDaily;
+          return a.layoverMins - b.layoverMins;
+        });
+
+        const likelyTrains = sortedValid.slice(0, 3);
+        for (const item of likelyTrains) {
+          visited.add(nextStation);
+          await dfs(
+            nextStation,
+            [
+              ...currentPath,
+              {
+                train: item.train,
+                from: current,
+                to: nextStation,
+                depTime: item.dep,
+                arrTime: item.arr,
+              },
+            ],
+            visited
+          );
+          visited.delete(nextStation);
+        }
       }
     }
 
-	    potentialRoutes.sort((a, b) => (a.layoverHours[0] + a.layoverHours[1]) - (b.layoverHours[0] + b.layoverHours[1]));
-    const routesToEvaluate = takeForCoverage(potentialRoutes, multiCandidateLimit);
+    await dfs(source, [], new Set([source]));
+
+    potentialRoutes.sort((a, b) => a.totalDurationMins - b.totalDurationMins);
+    const routesToEvaluate = takeForCoverage(potentialRoutes, 30);
     const results: MultiSplitRouteResult[] = [];
     const usedKeys = new Set<string>();
 
@@ -3117,15 +3186,9 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
       try {
         const legs: TrainResult[] = [];
         for (const train of route.trains) {
-          const enriched = await enrichWithLiveAvailability(train, formattedDate, classType, options, quota);
-          if (!hasVerifiedLiveClass(enriched)) {
-            legs.length = 0;
-            break;
-          }
-          legs.push(pruneToVerifiedLiveClasses(enriched));
-          if (legs.length < route.trains.length) await providerPaceDelay(options.liveLookupDelayMs ?? 500);
+          const enriched = await enrichWithLiveAvailability(train, formattedDate, classType, { ...options, fetchLive: false }, quota);
+          legs.push(enriched);
         }
-        if (legs.length !== route.trains.length) continue;
         const inactive = legs.some((leg) => {
           const availability = leg.availability.toLowerCase();
           return availability.includes('not available for booking') || availability.includes('cancel') || availability.includes('not running') || availability.includes('no service');
@@ -3141,16 +3204,16 @@ export async function findMultiSplitRoutes(source: string, dest: string, date: s
         const combinedConfirmationChance = predictionValues.length === legs.length
           ? Math.round(predictionValues.reduce((chance, current) => (chance * current) / 100, 100))
           : null;
-        const totalMinutes = legs.reduce((sum, leg) => sum + parseDurationMins(leg.duration), 0) + Math.round((route.layoverHours[0] + route.layoverHours[1]) * 60);
+        const totalMinutes = legs.reduce((sum, leg) => sum + parseDurationMins(leg.duration), 0) + Math.round(route.layoverHours.reduce((sum: number, hours: number) => sum + hours, 0) * 60);
 
         results.push({
           legs,
           interchangeStations: route.hubs,
           interchangeStationNames: route.hubs.map(hubLabel),
-          layovers: route.hubs.map((hub: string, index: number) => ({
-            station: hub,
-            duration: route.layoverDurations[index],
-            hours: route.layoverHours[index],
+          layovers: route.layovers.map((layover: any) => ({
+            station: layover.station,
+            duration: layover.duration,
+            hours: layover.hours,
           })),
           totalFare,
           totalDuration: formatDurationMinutes(totalMinutes),

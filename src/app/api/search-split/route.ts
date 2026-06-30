@@ -74,20 +74,20 @@ export async function POST(request: Request) {
       globalTimeoutMs: 25000,
     } as const;
 
-    const splitRoutes = await findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions, quota);
-    const multiSplitRoutes = splitRoutes.length >= 60
-      ? []
-      : await withTimeout(
-          findMultiSplitRoutes(source, destination, date, classType, preferredHub, {
-            ...plannerOptions,
-            maxMultiPlans: 30,
-            maxMultiLegOptions: 8,
-            maxMultiCandidates: 150,
-            maxMultiResults: 20,
-          }, quota),
-          1500,
-          []
-        );
+    const [splitRoutes, multiSplitRoutes] = await Promise.all([
+      findSmartRoutes(source, destination, date, classType, directTrains, preferredHub, plannerOptions, quota),
+      withTimeout(
+        findMultiSplitRoutes(source, destination, date, classType, preferredHub, {
+          ...plannerOptions,
+          maxMultiPlans: 30,
+          maxMultiLegOptions: 8,
+          maxMultiCandidates: 150,
+          maxMultiResults: 20,
+        }, quota),
+        7500,
+        []
+      )
+    ]);
 
     console.log('[search-split] source=', source, 'dest=', destination, 'date=', date, 'classType=', classType, 'quota=', quota);
     console.log('[search-split] splitRoutes from planner:', splitRoutes.length);
