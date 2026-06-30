@@ -634,10 +634,6 @@ export function TrainResultsWorkspace() {
       let directCountForRequest = 0;
       let splitCountForRequest = 0;
 
-      const reversePayload = { ...requestPayload };
-      reversePayload.source = requestPayload.destination;
-      reversePayload.destination = requestPayload.source;
-
       const forwardDirectPromise = postJson<any>("/api/train-between", requestPayload)
         .then((direct) => {
           if (requestId !== searchRequestId.current) return [];
@@ -659,16 +655,6 @@ export function TrainResultsWorkspace() {
           if (requestId !== searchRequestId.current) return [];
           const message = error instanceof Error ? error.message : "Direct train search failed.";
           setState((current) => ({ ...current, loading: false, error: message, trains: [] }));
-          return [];
-        });
-
-      const reverseDirectPromise = postJson<any>("/api/train-between", reversePayload)
-        .then((direct) => {
-          if (requestId !== searchRequestId.current) return [];
-          return direct.trains || [];
-        })
-        .catch(() => {
-          if (requestId !== searchRequestId.current) return [];
           return [];
         });
 
@@ -711,40 +697,13 @@ export function TrainResultsWorkspace() {
           return { splitRoutes: [], multiSplitRoutes: [] };
         });
 
-      const reverseSplitPromise = postJson<any>("/api/search-split", {
-        ...reversePayload,
-        directTrains: [],
-        mode: "quick",
-      })
-        .then((split) => {
-          const splitRoutes = split?.splitRoutes || split?.data?.splitRoutes || [];
-          const multiSplitRoutes = split?.multiSplitRoutes || split?.data?.multiSplitRoutes || [];
-          splitCountForRequest += splitRoutes.length + multiSplitRoutes.length;
-          setSplitStats((current) => ({
-            candidatesConsidered: current.candidatesConsidered + (split?.splitCandidatesConsidered || 0),
-            fullyVerifiedCount: current.fullyVerifiedCount + (split?.splitFullyVerifiedCount || 0),
-          }));
-          return { splitRoutes, multiSplitRoutes };
-        })
-        .catch(() => {
-          return { splitRoutes: [], multiSplitRoutes: [] };
-        });
-
-      const [[forwardDirect, reverseDirect], [forwardSplits, reverseSplits]] = await Promise.all([
-        Promise.allSettled([forwardDirectPromise, reverseDirectPromise]),
-        Promise.allSettled([forwardSplitPromise, reverseSplitPromise]),
+      const [directTrainsList, splitData] = await Promise.all([
+        forwardDirectPromise,
+        forwardSplitPromise,
       ]);
 
       if (requestId !== searchRequestId.current) return;
 
-      // Defense in depth: reject any train whose own reported direction is the exact
-      // reverse of what was searched (e.g. a JP -> PNBE train showing up for a
-      // PNBE -> JP search). The backend (trainService.ts) already filters these out at
-      // the source, but this is a free, cheap backstop in case a provider quirk we
-      // haven't seen yet slips one through. We check trainSource/trainDestination
-      // first since those carry the provider's own from/to codes; source/destination
-      // on a TrainResult is always set to the *requested* stations, so it can't be
-      // used to detect a reversed train on its own.
       const isReversedTrain = (t: any) => {
         const tSrc = String(t?.trainSource || t?.source || '').toUpperCase();
         const tDst = String(t?.trainDestination || t?.destination || '').toUpperCase();
@@ -753,58 +712,27 @@ export function TrainResultsWorkspace() {
         return Boolean(tSrc && tDst && tSrc === userDst && tDst === userSrc);
       };
 
-      const mergedTrains = [
-        ...(forwardDirect.status === 'fulfilled' ? forwardDirect.value : []).filter((t: any) => !isReversedTrain(t)),
-        ...(reverseDirect.status === 'fulfilled' ? reverseDirect.value : []).filter((t: any) => !isReversedTrain(t)),
-      ];
+      const finalTrains = (directTrainsList || []).filter((t: any) => !isReversedTrain(t));
 
-      setState((current) => ({ ...current, loading: false, trains: mergedTrains, error: mergedTrains.length === 0 && (forwardDirect.status !== 'fulfilled' && reverseDirect.status !== 'fulfilled') ? 'No direct trains found for this route.' : "" }));
-      queueLiveHydration(
-        mergedTrains,
-        { date: providerPayload.date, classType: providerPayload.classType, quota: providerPayload.quota },
-        requestId,
-        hydrationId,
-        "merged direct train rows",
-        AUTO_LIVE_DIRECT_LIMIT,
-        true // fetchAllClasses
-      );
+      setState((current) => ({
+        ...current,
+        loading: false,
+        trains: finalTrains,
+        error: finalTrains.length === 0 && !directTrainsList ? 'Direct train search failed.' : finalTrains.length === 0 ? 'No direct trains found for this route.' : ""
+      }));
 
-      if (forwardSplits.status === 'fulfilled' || reverseSplits.status === 'fulfilled') {
+      if (splitData) {
         const currentSplits = state.splits;
         const currentMultiSplits = state.multiSplits;
-        const forwardSplitData = forwardSplits.status === 'fulfilled' ? forwardSplits.value : null;
-        const reverseSplitData = reverseSplits.status === 'fulfilled' ? reverseSplits.value : null;
-
-        const filterReverseSplitRoutes = (routes: any[] = [], src: string, dst: string) => {
-          return routes.filter((route) => {
-            const leg1 = route.leg1 || {};
-            const leg1Src = (leg1.source || leg1.trainSource || '').toUpperCase();
-            const leg1Dst = (leg1.destination || leg1.trainDestination || '').toUpperCase();
-            const leg2 = route.leg2 || {};
-            const leg2Src = (leg2.source || leg2.trainSource || '').toUpperCase();
-            const leg2Dst = (leg2.destination || leg2.trainDestination || '').toUpperCase();
-
-            if (leg1Src === src && leg1Dst === dst) return true;
-            if (leg1Src === dst && leg1Dst === src) return false;
-            if ((leg1Src === src || !leg1Src) && (leg2Dst === dst || leg2Src === dst)) return true;
-            if (leg1Src === dst && leg2Dst === src) return false;
-            // Ambiguous/incomplete leg data — reject rather than default-accept. This
-            // came from a destination -> source query, so without a clear signal that
-            // it actually matches the requested source -> destination direction, the
-            // safer assumption is that it doesn't.
-            return false;
-          });
-        };
+        const forwardSplitData = splitData;
 
         const newSplits = [
           ...currentSplits,
           ...(forwardSplitData?.splitRoutes || []),
-          ...filterReverseSplitRoutes(reverseSplitData?.splitRoutes || [], providerPayload.source.toUpperCase(), providerPayload.destination.toUpperCase()),
         ];
         const newMultiSplits = [
           ...currentMultiSplits,
           ...(forwardSplitData?.multiSplitRoutes || []),
-          ...filterReverseSplitRoutes(reverseSplitData?.multiSplitRoutes || [], providerPayload.source.toUpperCase(), providerPayload.destination.toUpperCase()),
         ];
         setState((current) => ({
           ...current,
@@ -814,7 +742,6 @@ export function TrainResultsWorkspace() {
           multiSplits: newMultiSplits,
         }));
 
-        // split auto hydration is handled on mount by ClassRateStrip in SplitJourneyCard
         const mergedLiveLimit = Math.max(15, splitAutoLiveRouteCountForJourney(providerPayload.source, providerPayload.destination));
         const priorityMergedRoutes = newSplits.slice(0, mergedLiveLimit);
         splitAutoCheckedRouteCount.current = priorityMergedRoutes.length;
