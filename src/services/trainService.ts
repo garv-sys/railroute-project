@@ -2835,10 +2835,21 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       break;
     }
     try {
-      const [l1, l2] = await Promise.all([
-        searchTrainsSmart(source, hub, formattedDate, legOpts),
-        searchTrainsSmart(hub, dest, formattedDate, legOpts),
-      ]);
+      let l1 = await searchTrainsSmart(source, hub, formattedDate, legOpts);
+      let l2 = await searchTrainsSmart(hub, dest, formattedDate, legOpts);
+
+      const hubIndex = hubs.indexOf(hub);
+      const allowLiveFallback = hubIndex < 4;
+
+      if (l1.length === 0 && allowLiveFallback) {
+        console.log(`[split-hybrid] Local search returned 0 for ${source}->${hub}, running live fallback...`);
+        l1 = await searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true });
+      }
+      if (l2.length === 0 && allowLiveFallback) {
+        console.log(`[split-hybrid] Local search returned 0 for ${hub}->${dest}, running live fallback...`);
+        l2 = await searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true });
+      }
+
       if (l1.length === 0 || l2.length === 0) {
         console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected hub "${hub}" - no trains on one of the legs.`);
         continue;
