@@ -2758,6 +2758,53 @@ export async function generateSplitCandidates(
   return diverse;
 }
 
+function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15): SplitRouteResult[] {
+  const selected: SplitRouteResult[] = [];
+  const selectedKeys = new Set<string>();
+  
+  const routesByHub = new Map<string, SplitRouteResult[]>();
+  for (const r of results) {
+    if (!routesByHub.has(r.hubStation)) {
+      routesByHub.set(r.hubStation, []);
+    }
+    routesByHub.get(r.hubStation)!.push(r);
+  }
+
+  for (const list of routesByHub.values()) {
+    list.sort((a, b) => (b.score || 0) - (a.score || 0));
+  }
+
+  let added = true;
+  let pass = 0;
+  while (selected.length < limit && added && pass < 2) {
+    added = false;
+    for (const list of routesByHub.values()) {
+      if (selected.length >= limit) break;
+      if (list.length > pass) {
+        const route = list[pass];
+        const key = `${route.leg1.trainNo}_${route.hubStation}_${route.leg2.trainNo}`;
+        if (!selectedKeys.has(key)) {
+          selected.push(route);
+          selectedKeys.add(key);
+          added = true;
+        }
+      }
+    }
+    pass++;
+  }
+
+  const remaining = results.filter(r => !selectedKeys.has(`${r.leg1.trainNo}_${r.hubStation}_${r.leg2.trainNo}`));
+  remaining.sort((a, b) => (b.score || 0) - (a.score || 0));
+  
+  for (const route of remaining) {
+    if (selected.length >= limit) break;
+    selected.push(route);
+  }
+
+  selected.sort((a, b) => (b.score || 0) - (a.score || 0) || (b.totalFare || 0) - (a.totalFare || 0));
+  return selected;
+}
+
 // ---------------------------------------------------------------------------
 // enrichSplitCandidates — Phase 2: take raw candidates and fetch live data.
 // Processes exactly the requested candidates (a batch slice from the queue).
@@ -2852,9 +2899,9 @@ export async function enrichSplitCandidates(
     }
   }
 
-  results.sort((a, b) => (b.score || 0) - (a.score || 0));
-  console.log(`[TRACER] 5. Enrichment Finished: successfully enriched split routes count=${results.length}`);
-  return results;
+  const diverseResults = selectDiverseHubRoutes(results, 15);
+  console.log(`[TRACER] 5. Enrichment Finished: successfully enriched split routes count=${diverseResults.length}`);
+  return diverseResults;
 }
 
 export async function findSmartRoutes(source: string, dest: string, date: string, classType: string = 'Any', directTrains: any[] = [], preferredHubInput: string = '', options: TrainSearchOptions = {}, quota: string = 'GN'): Promise<SplitRouteResult[]> {
@@ -3032,9 +3079,9 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - enrichment exception:`, e);
     }
   }
-  results.sort((a, b) => (b.score || 0) - (a.score || 0) || (b.totalFare || 0) - (a.totalFare || 0));
-  console.log(`[TRACER] [findSmartRoutesForDate] 5. Enrichment Finished: successfully enriched count=${results.length}`);
-  return results.slice(0, 15);
+  const diverseResults = selectDiverseHubRoutes(results, 15);
+  console.log(`[TRACER] [findSmartRoutesForDate] 5. Enrichment Finished: successfully enriched count=${diverseResults.length}`);
+  return diverseResults;
 }
 
 function normalizeLegTime(time: string, baseDate: string, afterMs?: number) {
