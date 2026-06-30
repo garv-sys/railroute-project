@@ -2754,7 +2754,7 @@ function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15): SplitR
 
   let added = true;
   let pass = 0;
-  while (selected.length < limit && added && pass < 2) {
+  while (selected.length < limit && added && pass < 4) {
     added = false;
     for (const list of routesByHub.values()) {
       if (selected.length >= limit) break;
@@ -2915,7 +2915,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const allRoutes: any[] = [];
   const seen = new Set<string>();
 
-  for (const hub of hubs.slice(0, 40)) {
+  for (const hub of hubs.slice(0, 60)) {
     if (Date.now() - startTime > timeout - 3000) {
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Timeout exceeded during hub search.`);
       break;
@@ -2957,7 +2957,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       console.log(`[TRACER] [findSmartRoutesForDate] hub=${hub} leg1=${l1.length} leg2=${l2.length}`);
 
       // Per-hub diversity cap: each hub contributes at most 3 candidates to final pool
-      const hubCap = 3;
+      const hubCap = 6;
       let hubContrib = 0;
       for (const t1 of l1.slice(0, 8)) {
         for (const t2 of l2.slice(0, 8)) {
@@ -2990,7 +2990,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const results: SplitRouteResult[] = [];
   let enriched = 0;
   for (const route of allRoutes) {
-    if (enriched >= 35) break;
+    if (enriched >= 80) break;
     const routeString = `${route.t1.trainNo || route.t1.train_no} -> ${route.hub} -> ${route.t2.trainNo || route.t2.train_no}`;
     try {
       const liveOpts: TrainSearchOptions = { ...options, fetchLive: options.fetchLive !== false, fetchAllClasses: false, debug: false };
@@ -3066,7 +3066,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - enrichment exception:`, e);
     }
   }
-  const diverseResults = selectDiverseHubRoutes(results, 15);
+  const diverseResults = selectDiverseHubRoutes(results, 40);
   console.log(`[TRACER] [findSmartRoutesForDate] 5. Enrichment Finished: successfully enriched count=${diverseResults.length}`);
   return diverseResults;
 }

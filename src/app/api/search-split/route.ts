@@ -65,7 +65,7 @@ export async function POST(request: Request) {
       maxSplitHubs: 500,
       maxSplitLegOptions: 80,
       maxSplitCandidates: 8000,
-      maxSplitResults: 80,
+      maxSplitResults: 120,
       maxMultiPlans: 30,
       maxMultiLegOptions: 8,
       maxMultiCandidates: 150,
@@ -155,7 +155,7 @@ export async function POST(request: Request) {
       return selected;
     };
 
-    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 50);
+    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 80);
     console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
     const LIVE_TOP_SPLIT = mode === 'quick' ? 0 : Math.min(diverseRoutes.length, 60);
@@ -220,9 +220,9 @@ export async function POST(request: Request) {
       });
     }
 
-    let filteredSplitRoutes = finalRoutes.slice(0, 15);
+    let filteredSplitRoutes = finalRoutes.slice(0, 30);
 
-    if (filteredSplitRoutes.length < 15) {
+    if (filteredSplitRoutes.length < 30) {
       console.log('[search-split] Need more routes, trying expanded search on original date only');
       const retryOptions = {
         ...plannerOptions,
@@ -237,7 +237,7 @@ export async function POST(request: Request) {
       const existingKeys = new Set(filteredSplitRoutes.map(r => `${r.leg1?.trainNo}_${r.hubStation}_${r.leg2?.trainNo}`));
 
       for (const route of retryDiverse) {
-        if (filteredSplitRoutes.length >= 15) break;
+        if (filteredSplitRoutes.length >= 30) break;
         const key = `${route.leg1?.trainNo}_${route.hubStation}_${route.leg2?.trainNo}`;
         if (existingKeys.has(key)) continue;
         
@@ -261,7 +261,7 @@ export async function POST(request: Request) {
       }
     }
 
-    filteredSplitRoutes = filteredSplitRoutes.slice(0, 15);
+    filteredSplitRoutes = filteredSplitRoutes.slice(0, 30);
     // Final ranking: highest confirmation chance first, then score, then lowest fare
     filteredSplitRoutes.sort((a: any, b: any) => {
       const chanceDiff = (b.combinedConfirmationChance ?? 0) - (a.combinedConfirmationChance ?? 0);
