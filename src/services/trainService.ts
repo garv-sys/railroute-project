@@ -2812,6 +2812,18 @@ export async function enrichSplitCandidates(
         continue;
       }
 
+      const c1 = e1.confirmationChance !== undefined ? e1.confirmationChance : 100;
+      const c2 = e2.confirmationChance !== undefined ? e2.confirmationChance : 100;
+      const combinedChance = Math.min(c1, c2);
+
+      let layoverPenalty = layoverHrs * 3;
+      if (layoverHrs < 1.0) {
+        layoverPenalty += (1.0 - layoverHrs) * 20; // Risk penalty
+      } else if (layoverHrs > 4.0) {
+        layoverPenalty += (layoverHrs - 4.0) * 5; // Long wait penalty
+      }
+      const scoreVal = 100 - layoverPenalty + (cand.score - 50) * 0.4 + (combinedChance - 50) * 0.3;
+
       results.push({
         hubStation: cand.hub,
         hubStationName: cand.hubName,
@@ -2825,10 +2837,10 @@ export async function enrichSplitCandidates(
         leg1Fare: f1,
         leg2Fare: f2,
         totalFare: f1 + f2,
-        score: 100 - layoverHrs * 2 + (cand.score - 50) * 0.4,
+        score: scoreVal,
         leg1: e1,
         leg2: e2,
-        combinedConfirmationChance: null,
+        combinedConfirmationChance: combinedChance,
         isHeritage: false,
       });
       console.log(`[TRACER] Validation: Successfully enriched and accepted route "${routeString}" (Total Fare: ₹${f1 + f2}, Layover: ${layoverHrs.toFixed(1)}h).`);
@@ -2867,7 +2879,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const allRoutes: any[] = [];
   const seen = new Set<string>();
 
-  for (const hub of hubs.slice(0, 25)) {
+  for (const hub of hubs.slice(0, 40)) {
     if (Date.now() - startTime > timeout - 3000) {
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Timeout exceeded during hub search.`);
       break;
@@ -2979,6 +2991,19 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - layover ${layoverHrs.toFixed(1)}h is outside [0, 24] range.`);
         continue;
       }
+      const c1 = e1.confirmationChance !== undefined ? e1.confirmationChance : 100;
+      const c2 = e2.confirmationChance !== undefined ? e2.confirmationChance : 100;
+      const combinedChance = Math.min(c1, c2);
+
+      // Higher combined chance boosts the score, lower total fare is preferred
+      let layoverPenalty = layoverHrs * 3;
+      if (layoverHrs < 1.0) {
+        layoverPenalty += (1.0 - layoverHrs) * 20; // Risk penalty
+      } else if (layoverHrs > 4.0) {
+        layoverPenalty += (layoverHrs - 4.0) * 5; // Long wait penalty
+      }
+      const scoreVal = 100 - layoverPenalty + (combinedChance - 50) * 0.4;
+
       results.push({
         hubStation: route.hub,
         hubStationName: hubLabel(route.hub),
@@ -2992,10 +3017,10 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         leg1Fare: f1,
         leg2Fare: f2,
         totalFare: f1 + f2,
-        score: 100 - layoverHrs * 2,
+        score: scoreVal,
         leg1: e1,
         leg2: e2,
-        combinedConfirmationChance: null,
+        combinedConfirmationChance: combinedChance,
         isHeritage: false,
       });
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Accepted route "${routeString}" (Total Fare: ₹${f1 + f2}, Layover: ${layoverHrs.toFixed(1)}h).`);
