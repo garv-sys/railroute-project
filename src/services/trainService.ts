@@ -603,6 +603,24 @@ function normalizeStationCode(code: string) {
     'MGS': 'DDU',
     'MUGHAL SARAI': 'DDU',
     'MUGHALSARAI': 'DDU',
+    'RANCHI': 'RNC',
+    'RANCHI JN': 'RNC',
+    'HATIA': 'HTE',
+    'MURI': 'MURI',
+    'MURI JN': 'MURI',
+    'JHARSUGUDA': 'JSG',
+    'JHARSUGUDA JN': 'JSG',
+    'DUMRAON': 'DURE',
+    'PUNE': 'PUNE',
+    'POONA': 'PUNE',
+    'PUNE JN': 'PUNE',
+    'LONAVALA': 'LNL',
+    'KASARA': 'KJT',
+    'BOISAR': 'BST',
+    'JODHPUR': 'JU',
+    'AJMER': 'AII',
+    'BIKANER': 'BKN',
+    'BHILWARA JN': 'BHL',
   };
   const upper = (code || '').toUpperCase().trim();
   return map[upper] || upper;
@@ -709,9 +727,9 @@ const CITY_TERMINAL_CLUSTERS: Record<string, string[]> = {
   BDTS: ['BDTS', 'BCT', 'MMCT', 'LTT', 'CSMT', 'DDR', 'DR'],
   DR: ['DR', 'CSMT', 'LTT', 'MMCT', 'BCT', 'BDTS', 'DDR'],
   DDR: ['DDR', 'BCT', 'MMCT', 'BDTS', 'CSMT', 'LTT', 'DR'],
-  SC: ['SC', 'HYB', 'KCG', 'WL'],
-  HYB: ['HYB', 'SC', 'KCG', 'WL'],
-  KCG: ['KCG', 'SC', 'HYB', 'WL'],
+  SC: ['SC', 'HYB', 'KCG', 'WL', 'BMT'],
+  HYB: ['HYB', 'SC', 'KCG', 'WL', 'BMT'],
+  KCG: ['KCG', 'SC', 'HYB', 'WL', 'BMT'],
   GHY: ['GHY', 'KYQ'],
   KYQ: ['KYQ', 'GHY'],
   MAS: ['MAS', 'MS', 'TBM', 'PER'],
@@ -729,6 +747,8 @@ const CITY_TERMINAL_CLUSTERS: Record<string, string[]> = {
   RNC: ['RNC', 'HTE', 'MURI'],
   HTE: ['HTE', 'RNC', 'MURI'],
   MURI: ['MURI', 'RNC', 'HTE'],
+  PUNE: ['PUNE', 'LNL', 'KJT', 'PNVL'],
+  LNL: ['LNL', 'PUNE', 'KJT'],
 };
 
 const SPLIT_HUB_ALIASES: Record<string, string[]> = {
@@ -1083,14 +1103,17 @@ const MAJOR_HUB_LIST: MajorHub[] = Array.from(
 const MAJOR_HUB_BY_CODE = new Map(MAJOR_HUB_LIST.map((hub) => [hub.code, hub]));
 const NATIONAL_LONG_DISTANCE_SPLIT_HUBS = [
   // Eastern Corridor
-  'DDU', 'MGS', 'BSB', 'BSBS', 'PRYJ', 'GAYA', 'DHN', 'ASN', 'TATA', 'RNC', 'ROU', 'HWH', 'BBS', 'DNR', 'PNBE',
+  'DDU', 'MGS', 'BSB', 'BSBS', 'PRYJ', 'GAYA', 'DHN', 'ASN', 'TATA', 'RNC', 'HTE', 'MURI', 'ROU', 'HWH', 'BBS', 'DNR', 'PNBE',
   // Central India
   'CNB', 'LKO', 'LJN', 'NDLS', 'NZM', 'DLI', 'ANVT', 'DEE', 'AGC', 'JHS', 'VGLJ', 'MTJ',
   // West & NW India / Rajasthan
   'JP', 'AII', 'KOTA', 'SWM', 'RTM', 'UJN', 'INDB', 'BPL', 'ET', 'JBP', 'KTE', 'ABR', 'BRC', 'ADI',
-  'AWR', 'AJM', 'BKN', 'JU', 'UDZ',
-  // South & Central
-  'NGP', 'BZA', 'VSKP', 'MAS', 'SC', 'HYB', 'KCG', 'SBC', 'YPR',
+  'AWR', 'AJM', 'BKN', 'JU', 'UDZ', 'BHL', 'CHI',
+  // South & Deccan
+  'NGP', 'BZA', 'GNT', 'VSKP', 'MAS', 'SC', 'HYB', 'KCG', 'SBC', 'YPR',
+  'MYS', 'UBL', 'HUB', 'NED', 'WL', 'DD', 'PA',
+  // Pune / Mumbai corridor
+  'PUNE', 'LNL', 'KJT', 'BST', 'CSMT', 'LTT', 'MMCT',
   // Jharkhand/Chhattisgarh
   'R', 'BSP', 'DURG', 'NED', 'WL',
   // Bihar/UP extras
@@ -1203,13 +1226,19 @@ const USER_PRIORITY_HUBS = new Set([
   'BSB', 'BSBS',
   'JP', 'AII', 'AWR', 'AJM', 'BKN', 'JU', 'UDZ',
   // Secondary hubs
-  'ASN', 'HWH', 'TATA', 'RNC',
+  'ASN', 'HWH', 'TATA', 'RNC', 'HTE', 'MURI',
   'BSP', 'R', 'DURG',
   'NGP',
   'ET',
   'UJN',
   'RTM', 'SWM',
   'ROU', 'JSG', 'KTE', 'KMZ', 'GWL', 'VGLJ', 'JHS',
+  // Rajasthan interior hubs
+  'BHL', 'CHI', 'AWR',
+  // South/Deccan hubs
+  'SC', 'HYB', 'KCG', 'NED', 'WL', 'GNT', 'BZA',
+  // South-west hubs
+  'SBC', 'YPR', 'MYS', 'UBL', 'HUB',
 ]);
 
 export function dynamicSplitHubCandidates(source: string, dest: string, preferredHub = '', limit = Number.POSITIVE_INFINITY) {
@@ -2617,8 +2646,8 @@ export async function generateSplitCandidates(
         continue;
       }
 
-      for (const t1 of l1.slice(0, 6)) {
-        for (const t2 of l2.slice(0, 6)) {
+      for (const t1 of l1.slice(0, 8)) {
+        for (const t2 of l2.slice(0, 8)) {
           totalRoutesGeneratedCount++;
           const tn1 = (t1.trainNo || t1.train_no || '').toString().replace(/\D/g, '');
           const tn2 = (t2.trainNo || t2.train_no || '').toString().replace(/\D/g, '');
@@ -2630,7 +2659,7 @@ export async function generateSplitCandidates(
             console.log(`[TRACER] Validation: Rejected route "${routeString}" - SAME train used for both legs.`);
             continue;
           }
-          const key = `${tn1}_${hub}_${tn2}`;
+          const key = `${tn1}_${tn2}`;
           if (seen.has(key)) {
             console.log(`[TRACER] Validation: Rejected route "${routeString}" - DUPLICATE train combination.`);
             continue;
@@ -2690,7 +2719,7 @@ export async function generateSplitCandidates(
     }
   }
 
-  // Diversity filter: limit same-hub to 3 and same-train to 5
+  // Diversity filter: limit same-hub to 5 and same-train to 8 to allow broad coverage
   const hubCounts = new Map<string, number>();
   const trainCounts = new Map<string, number>();
   const diverse: SplitCandidate[] = [];
@@ -2706,11 +2735,11 @@ export async function generateSplitCandidates(
     const hubCount = hubCounts.get(c.hub) || 0;
     const t1Count = trainCounts.get(tn1) || 0;
     const t2Count = trainCounts.get(tn2) || 0;
-    if (hubCount >= 3) {
+    if (hubCount >= 5) {
       console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Diversity filter (too many routes for hub ${c.hub}).`);
       continue;
     }
-    if (t1Count >= 5 && t2Count >= 5) {
+    if (t1Count >= 8 && t2Count >= 8) {
       console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Diversity filter (too many repetitions for trains).`);
       continue;
     }
@@ -2835,7 +2864,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const allRoutes: any[] = [];
   const seen = new Set<string>();
 
-  for (const hub of hubs.slice(0, 15)) {
+  for (const hub of hubs.slice(0, 25)) {
     if (Date.now() - startTime > timeout - 3000) {
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Timeout exceeded during hub search.`);
       break;
