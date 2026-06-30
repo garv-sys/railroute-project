@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     const coverageMode = "quick" as const;
     const plannerOptions = {
       debug: Boolean(debug),
-      fetchLive: false,
+      fetchLive: true,
       liveLookupLimit: 0,
       coverageMode,
       exactStationOnly: false,

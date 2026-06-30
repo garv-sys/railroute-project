@@ -2835,19 +2835,31 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       break;
     }
     try {
-      let l1 = await searchTrainsSmart(source, hub, formattedDate, legOpts);
-      let l2 = await searchTrainsSmart(hub, dest, formattedDate, legOpts);
-
       const hubIndex = hubs.indexOf(hub);
-      const allowLiveFallback = hubIndex < 4;
+      const useLive = hubIndex < 4 && options.fetchLive !== false;
+      let l1: any[] = [];
+      let l2: any[] = [];
 
-      if (l1.length === 0 && allowLiveFallback) {
-        console.log(`[split-hybrid] Local search returned 0 for ${source}->${hub}, running live fallback...`);
-        l1 = await searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true });
-      }
-      if (l2.length === 0 && allowLiveFallback) {
-        console.log(`[split-hybrid] Local search returned 0 for ${hub}->${dest}, running live fallback...`);
-        l2 = await searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true });
+      if (useLive) {
+        console.log(`[split-live] Always fetching live trains for hub ${hub} (${source}->${hub} and ${hub}->${dest})...`);
+        const [r1, r2] = await Promise.all([
+          searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true }),
+          searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true }),
+        ]);
+        l1 = r1;
+        l2 = r2;
+      } else {
+        l1 = await searchTrainsSmart(source, hub, formattedDate, legOpts);
+        l2 = await searchTrainsSmart(hub, dest, formattedDate, legOpts);
+
+        if (l1.length === 0 && hubIndex < 4) {
+          console.log(`[split-hybrid] Local search returned 0 for ${source}->${hub}, running live fallback...`);
+          l1 = await searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true });
+        }
+        if (l2.length === 0 && hubIndex < 4) {
+          console.log(`[split-hybrid] Local search returned 0 for ${hub}->${dest}, running live fallback...`);
+          l2 = await searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true });
+        }
       }
 
       if (l1.length === 0 || l2.length === 0) {

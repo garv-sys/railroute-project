@@ -564,8 +564,11 @@ export function classFareAmount(train: any, classCode: string) {
   const row = code ? train?.classAvailability?.[code]?.[0] : undefined;
   const rowFare = fareToNumber(row?.fare);
   if (rowFare > 0) return rowFare;
-  if (String(train?.classType || "").toUpperCase() === code) return trainFareAmount(train);
-  return 0;
+  if (String(train?.classType || "").toUpperCase() === code) {
+    const mainFare = trainFareAmount(train);
+    if (mainFare > 0) return mainFare;
+  }
+  return estimatedFareAmount(train, classCode || code || "");
 }
 
 export function classFareBreakdown(train: any, classCode: string) {
@@ -658,12 +661,10 @@ export function liveDataUnavailableWarning(train: any, classCode?: string) {
 
 export function compactFareText(value: unknown) {
   const text = String(value || "").trim();
-  // Never show estimated guesses or "Fare unavailable" text in badges
-  if (/^~?₹[\d,]+\s*est\./i.test(text)) return "";
   if (/fare unavailable/i.test(text)) return "";
   if (/not requested|check fare|tap class/i.test(text)) return "";
   if (/tap to retry|failed to fetch|fetch failed|provider request failed|request failed|provider did not return|availability unavailable|timed out|request timed out|error|unavailable/i.test(text)) return "";
-  return formatFare(value);
+  return text || formatFare(value);
 }
 
 export function compactSeatText(train: any) {
@@ -745,6 +746,8 @@ export function classFareText(train: any, classCode: string) {
   const fare = fareToNumber(first?.fare);
   const status = first?.fareStatus || "PROVIDER_UNAVAILABLE";
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
+  const est = estimatedFareAmount(train, classCode || code || "");
+  if (est > 0) return `${formatFare(est)} (est.)`;
   return "";
 }
 
