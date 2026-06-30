@@ -971,74 +971,86 @@ export function TrainResultsWorkspace() {
               (async () => {
                 let quote: LiveClassQuote | null = null;
                 let rateLimited = false;
+                let success = false;
+                let attempts = 0;
+                const maxRetries = 3;
 
                 try {
-                  // Race the actual fetch against a hard timeout — whichever settles first wins.
-                  const fetchResult = await Promise.race<{ quote: LiveClassQuote; rateLimited: boolean } | "TIMEOUT">([
-                    (async () => {
-                      const targetDate = target.journeyDate || trainJourneyDate(target.train, payload.date);
-                      const response = await postJson<any>("/api/availability", {
-                        trainNo: target.train.trainNo,
-                        source: liveSourceStation(target.train),
-                        destination: liveDestinationStation(target.train),
-                        date: targetDate,
-                        classType: target.classCode,
-                        quota: payload.quota || "GN",
-                        debug: debugModeEnabled(),
-                      });
-                      const nextQuote = liveQuoteFromResponse(response, target.classCode, targetDate);
-                      const nextRateLimited = isProviderDelay(`${nextQuote.availability} ${nextQuote.warning || ""} ${nextQuote.error || ""}`);
-                      return { quote: nextQuote, rateLimited: nextRateLimited };
-                    })(),
-                    new Promise<"TIMEOUT">((r) => setTimeout(() => r("TIMEOUT"), FETCH_HARD_TIMEOUT_MS)),
-                  ]);
+                  while (attempts <= maxRetries && !success) {
+                    if (requestId !== searchRequestId.current || hydrationId !== liveHydrationGeneration.current) {
+                      break;
+                    }
+                    if (attempts > 0) {
+                      const delayMs = Math.pow(2, attempts - 1) * 1000;
+                      console.log(`[retry] Waiting ${delayMs}ms before attempt ${attempts + 1} for ${target.train.trainNo} (${target.classCode})`);
+                      await new Promise((resolve) => setTimeout(resolve, delayMs));
+                    }
+                    attempts++;
 
-                  if (fetchResult === "TIMEOUT") {
-                    console.error("Hydration request timed out", target);
-                    const cleanMessage = providerIssueCopy("Request timed out", target.classCode);
-                    quote = {
-                      availability: lookupStatusLabel("PROVIDER_UNAVAILABLE", "availability", target.classCode, cleanMessage),
-                      fare: 0,
-                      source: "Timed out",
-                      updatedTime: cleanMessage,
-                      availabilityStatus: "PROVIDER_UNAVAILABLE",
-                      fareStatus: "PROVIDER_UNAVAILABLE",
-                      lookupReason: cleanMessage,
-                      error: cleanMessage,
-                    };
-                  } else {
-                    rateLimited = fetchResult.rateLimited;
-                    quote = fetchResult.quote;
-                    if (rateLimited) {
-                      const rateLimitedCopy = providerDelayCopy(target.classCode);
-                      quote = {
-                        ...quote,
-                        availability: rateLimitedCopy,
-                        source: "Live check queued",
-                        updatedTime: rateLimitedCopy,
-                        availabilityStatus: "RATE_LIMITED",
-                        fareStatus: quote.fare > 0 ? "VERIFIED" : "RATE_LIMITED",
-                        lookupReason: rateLimitedCopy,
-                        error: rateLimitedCopy,
-                      };
+                    try {
+                      // Race the actual fetch against a hard timeout — whichever settles first wins.
+                      const fetchResult = await Promise.race<{ quote: LiveClassQuote; rateLimited: boolean } | "TIMEOUT">([
+                        (async () => {
+                          const targetDate = target.journeyDate || trainJourneyDate(target.train, payload.date);
+                          const response = await postJson<any>("/api/availability", {
+                            trainNo: target.train.trainNo,
+                            source: liveSourceStation(target.train),
+                            destination: liveDestinationStation(target.train),
+                            date: targetDate,
+                            classType: target.classCode,
+                            quota: payload.quota || "GN",
+                            debug: debugModeEnabled(),
+                          });
+                          const nextQuote = liveQuoteFromResponse(response, target.classCode, targetDate);
+                          const nextRateLimited = isProviderDelay(`${nextQuote.availability} ${nextQuote.warning || ""} ${nextQuote.error || ""}`);
+                          return { quote: nextQuote, rateLimited: nextRateLimited };
+                        })(),
+                        new Promise<"TIMEOUT">((r) => setTimeout(() => r("TIMEOUT"), FETCH_HARD_TIMEOUT_MS)),
+                      ]);
+
+                      if (fetchResult === "TIMEOUT") {
+                        console.error(`[retry] Attempt ${attempts} timed out for ${target.train.trainNo}`);
+                        continue;
+                      }
+
+                      rateLimited = fetchResult.rateLimited;
+                      quote = fetchResult.quote;
+
+                      const availText = String(quote.availability || "").toLowerCase();
+                      const isFailureStatus =
+                        rateLimited ||
+                        !quote.availability ||
+                        availText.includes("no data") ||
+                        availText.includes("unavailable") ||
+                        availText.includes("rate limit") ||
+                        availText.includes("failed") ||
+                        quote.availabilityStatus === "PROVIDER_UNAVAILABLE" ||
+                        quote.availabilityStatus === "RATE_LIMITED";
+
+                      if (isFailureStatus) {
+                        console.warn(`[retry] Attempt ${attempts} returned invalid/incomplete data: "${quote.availability}" for ${target.train.trainNo}`);
+                      } else {
+                        success = true;
+                      }
+                    } catch (error) {
+                      console.error(`[retry] Attempt ${attempts} failed with error for ${target.train.trainNo}:`, error);
                     }
                   }
-                } catch (error) {
-                  console.error("Hydration request failed", error);
-                  const message = error instanceof Error ? error.message : "Provider request failed";
-                  rateLimited = isProviderDelay(message);
-                  const lookupStatus: LookupTrustStatus = rateLimited ? "RATE_LIMITED" : "PROVIDER_UNAVAILABLE";
-                  const cleanMessage = providerIssueCopy(message, target.classCode);
-                  quote = {
-                    availability: lookupStatusLabel(lookupStatus, "availability", target.classCode, cleanMessage),
-                    fare: 0,
-                    source: rateLimited ? "Live check queued" : "Provider unavailable",
-                    updatedTime: cleanMessage,
-                    availabilityStatus: lookupStatus,
-                    fareStatus: lookupStatus,
-                    lookupReason: cleanMessage,
-                    error: cleanMessage,
-                  };
+
+                  if (!success) {
+                    const finalMsg = "Data unavailable after multiple attempts.";
+                    quote = {
+                      availability: finalMsg,
+                      fare: 0,
+                      source: "Unavailable",
+                      updatedTime: finalMsg,
+                      availabilityStatus: "PROVIDER_UNAVAILABLE",
+                      fareStatus: "PROVIDER_UNAVAILABLE",
+                      lookupReason: finalMsg,
+                      error: finalMsg,
+                    };
+                    rateLimited = false;
+                  }
                 } finally {
                   // CRITICAL: always runs — success, error, or timeout.
                   // Progress MUST increment on every path so the queue never stalls.
@@ -2881,7 +2893,7 @@ function SplitResultsPanel({
   classType: string;
   quota: string;
 }) {
-  const [visibleLimit, setVisibleLimit] = useState(10);
+  const [visibleLimit, setVisibleLimit] = useState(15);
   const [readyKeys, setReadyKeys] = useState<Set<string>>(new Set());
   const [validKeys, setValidKeys] = useState<Set<string>>(new Set());
   const handleReady = useCallback((key: string, isValid?: boolean) => {
