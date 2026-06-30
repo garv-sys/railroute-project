@@ -726,6 +726,9 @@ const CITY_TERMINAL_CLUSTERS: Record<string, string[]> = {
   BSBS: ['BSBS', 'BSB', 'DDU'],
   DDU: ['DDU', 'BSB', 'BSBS'],
   MGS: ['DDU', 'BSB', 'BSBS'],
+  RNC: ['RNC', 'HTE', 'MURI'],
+  HTE: ['HTE', 'RNC', 'MURI'],
+  MURI: ['MURI', 'RNC', 'HTE'],
 };
 
 const SPLIT_HUB_ALIASES: Record<string, string[]> = {
@@ -2878,7 +2881,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
             console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route SAME train: ${tn1}`);
             continue;
           }
-          const key = `${tn1}_${hub}_${tn2}`;
+          const key = `${tn1}_${tn2}`;
           if (seen.has(key)) continue;
           seen.add(key);
 
