@@ -722,18 +722,9 @@ export function TrainResultsWorkspace() {
       }));
 
       if (splitData) {
-        const currentSplits = state.splits;
-        const currentMultiSplits = state.multiSplits;
         const forwardSplitData = splitData;
-
-        const newSplits = [
-          ...currentSplits,
-          ...(forwardSplitData?.splitRoutes || []),
-        ];
-        const newMultiSplits = [
-          ...currentMultiSplits,
-          ...(forwardSplitData?.multiSplitRoutes || []),
-        ];
+        const newSplits = forwardSplitData?.splitRoutes || [];
+        const newMultiSplits = forwardSplitData?.multiSplitRoutes || [];
         setState((current) => ({
           ...current,
           splitLoading: false,
