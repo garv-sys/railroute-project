@@ -41,6 +41,7 @@ import {
   STATION_COORDS,
   titleCase,
   type Station,
+  stationMatches,
 } from "@/lib/railway-intelligence";
 
 import { softPanel, productBg } from "./styles";
@@ -790,6 +791,8 @@ export function resolveStationInput(selectedCode: string, query: string) {
   const exactCode = stationByCode(trimmed.toUpperCase());
   if (exactCode) return exactCode.code;
   if (normalizeText(trimmed).length < 3) return "";
+  const matches = stationMatches(trimmed, 1);
+  if (matches && matches[0]) return matches[0].code;
   return /^[A-Z0-9]{2,6}$/.test(trimmed) ? trimmed.toUpperCase() : "";
 }
 

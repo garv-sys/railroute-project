@@ -1760,13 +1760,13 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
           if (!isDemoMode) {
             list.push(unavailableRow(
               dj,
-              runs ? 'Not returned in provider response' : 'Not Running',
+              runs ? 'Tap to check seats' : 'Not Running',
               runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
               !runs,
               getFallbackMockFare(trainNo, source, destination, classCode),
               undefined,
-              runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
-              runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+              runs ? 'NOT_CHECKED' : 'PROVIDER_UNAVAILABLE',
+              runs ? 'NOT_CHECKED' : 'PROVIDER_UNAVAILABLE'
             ));
             continue;
           }
