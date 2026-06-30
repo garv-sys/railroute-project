@@ -238,6 +238,8 @@ const COMMON_CITY_ALIASES: Record<string, string[]> = {
   RANCHI: ["RNC", "HTE"],
   JHARSUGUDA: ["JSG"],
   MURI: ["MURI"],
+  ASANSOLE: ["ASN"],
+  ASANSOL: ["ASN"],
   DAWKI: ["GHY"],
   DEHRADUN: ["DDN", "HW", "RK"],
   DELHI: ["NDLS", "DLI", "NZM", "ANVT", "DEE", "DSJ", "DEC", "SSB"],

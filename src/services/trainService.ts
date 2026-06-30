@@ -618,6 +618,8 @@ function normalizeStationCode(code: string) {
     'KASARA': 'KJT',
     'BOISAR': 'BST',
     'JODHPUR': 'JU',
+    'ASANSOLE': 'ASN',
+    'ASANSOL': 'ASN',
     'AJMER': 'AII',
     'BIKANER': 'BKN',
     'BHILWARA JN': 'BHL',
