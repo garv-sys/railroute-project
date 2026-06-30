@@ -2969,8 +2969,8 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       }
       console.log(`[TRACER] [findSmartRoutesForDate] hub=${hub} leg1=${l1.length} leg2=${l2.length}`);
 
-      // Per-hub diversity cap: each hub contributes at most 5 candidates to final pool
-      const hubCap = 5;
+      // Per-hub diversity cap: each hub contributes at most 3 candidates to final pool
+      const hubCap = 3;
       let hubContrib = 0;
       for (const t1 of l1.slice(0, 8)) {
         for (const t2 of l2.slice(0, 8)) {
@@ -3003,7 +3003,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const results: SplitRouteResult[] = [];
   let enriched = 0;
   for (const route of allRoutes) {
-    if (enriched >= 15) break;
+    if (enriched >= 35) break;
     const routeString = `${route.t1.trainNo || route.t1.train_no} -> ${route.hub} -> ${route.t2.trainNo || route.t2.train_no}`;
     try {
       const liveOpts: TrainSearchOptions = { ...options, fetchLive: options.fetchLive !== false, fetchAllClasses: false, debug: false };
