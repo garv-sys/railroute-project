@@ -2801,7 +2801,16 @@ function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15): SplitR
     selected.push(route);
   }
 
-  selected.sort((a, b) => (b.score || 0) - (a.score || 0) || (b.totalFare || 0) - (a.totalFare || 0));
+  selected.sort((a, b) => {
+    // 1. Highest confirmation chance first
+    const chanceDiff = (b.combinedConfirmationChance || 0) - (a.combinedConfirmationChance || 0);
+    if (chanceDiff !== 0) return chanceDiff;
+    // 2. Highest score first (layover quality)
+    const scoreDiff = (b.score || 0) - (a.score || 0);
+    if (scoreDiff !== 0) return scoreDiff;
+    // 3. Lowest total fare first
+    return (a.totalFare || 0) - (b.totalFare || 0);
+  });
   return selected;
 }
 
