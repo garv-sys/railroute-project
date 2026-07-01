@@ -8056,17 +8056,10 @@
         "day": 2
       },
       {
-        "code": "AWR",
-        "arrival": "02:50",
-        "departure": "02:52",
-        "distance": 409,
-        "day": 2
-      },
-      {
         "code": "JP",
         "arrival": "04:40",
         "departure": "04:40",
-        "distance": 563,
+        "distance": 435,
         "day": 2
       }
     ]
