@@ -6340,13 +6340,6 @@
         "day": 2
       },
       {
-        "code": "JP",
-        "arrival": "06:45",
-        "departure": "06:50",
-        "distance": 923,
-        "day": 2
-      },
-      {
         "code": "NDLS",
         "arrival": "13:00",
         "departure": "13:00",
@@ -6370,13 +6363,6 @@
         "arrival": "16:35",
         "departure": "16:35",
         "distance": 0,
-        "day": 1
-      },
-      {
-        "code": "JP",
-        "arrival": "22:50",
-        "departure": "22:55",
-        "distance": 614,
         "day": 1
       },
       {
