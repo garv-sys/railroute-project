@@ -1325,20 +1325,6 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
 
   filteredCandidates.sort((a, b) => getHubScore(a) - getHubScore(b));
 
-  const isPatnaOrDduStn = (stn: string) => {
-    const s = normalizeStationCode(stn);
-    if (s === 'PNBE' || s === 'DDU' || s === 'MGS' || s === 'DURE') return true;
-    const cluster = sameAreaTerminalClusterFor(s, 60);
-    return cluster.includes('PNBE') || cluster.includes('DDU');
-  };
-
-  const isJaipurStn = (stn: string) => {
-    const s = normalizeStationCode(stn);
-    if (s === 'JP') return true;
-    const cluster = sameAreaTerminalClusterFor(s, 60);
-    return cluster.includes('JP');
-  };
-
   return takeForCoverage(filteredCandidates, limit);
 }
 
@@ -2724,10 +2710,20 @@ export async function enrichSplitCandidates(
   for (const cand of rawCandidates) {
     const routeString = `${cand.t1.trainNo || cand.t1.train_no} -> ${cand.hub} -> ${cand.t2.trainNo || cand.t2.train_no}`;
     try {
+      const l1ArrRaw = cand.t1.arrivalTime || cand.t1.to_time || cand.t1.to_std || '';
+      const l2DepRaw = cand.t2.departureTime || cand.t2.from_time || cand.t2.from_std || '';
+      let leg2Date = formattedDate;
+      if (l1ArrRaw && l2DepRaw) {
+        const arrivalMsRaw = parseTime(l1ArrRaw, formattedDate).getTime();
+        let depMsRaw = parseTime(l2DepRaw, formattedDate).getTime();
+        while (depMsRaw < arrivalMsRaw) depMsRaw += 86400000;
+        leg2Date = formatRailDate(new Date(depMsRaw));
+      }
+
       const liveOpts: TrainSearchOptions = { ...options, fetchLive: true, fetchAllClasses: false, debug: false };
       const [e1, e2] = await Promise.all([
         enrichWithLiveAvailability({ ...cand.t1 }, formattedDate, classType, liveOpts, quota),
-        enrichWithLiveAvailability({ ...cand.t2 }, formattedDate, classType, liveOpts, quota),
+        enrichWithLiveAvailability({ ...cand.t2 }, leg2Date, classType, liveOpts, quota),
       ]);
       let f1 = safeParseFare(e1.fare);
       let f2 = safeParseFare(e2.fare);
