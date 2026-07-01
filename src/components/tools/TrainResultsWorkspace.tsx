@@ -2849,7 +2849,7 @@ function SplitResultsPanel({
               requestedClass={classType}
               quota={quota}
               autoFetchLive
-              fetchDelay={index * 100}
+              fetchDelay={index * 1500}
               onReady={handleReady}
             />
           </div>
@@ -2876,6 +2876,7 @@ function SplitResultsPanel({
           requestedClass={classType}
           quota={quota}
           autoFetchLive
+          fetchDelay={(splits.length + index) * 1500}
         />
       ))}
     </div>
@@ -3287,7 +3288,7 @@ export function SplitJourneyCard({
             Transfer buffer shown; platform numbers are assigned by railway operations.
           </span>
         </div>
-        {renderLeg(leg2, "Leg 2", split.leg2Fare, mapOpen2, setMapOpen2, mapRoute2, mapRouteLoading2, mapStations2, fetchDelay + 150, () => setLeg2Done(true))}
+        {renderLeg(leg2, "Leg 2", split.leg2Fare, mapOpen2, setMapOpen2, mapRoute2, mapRouteLoading2, mapStations2, fetchDelay + 750, () => setLeg2Done(true))}
       </div>
       {classPanel && <ClassSnapshotPanel selection={classPanel} onClose={() => setClassPanel(null)} />}
     </article>
@@ -3301,6 +3302,7 @@ export function MultiSplitJourneyCard({
   quota = "GN",
   autoFetchLive = false,
   rank,
+  fetchDelay = 0,
 }: {
   split: any;
   journeyDate: string;
@@ -3308,6 +3310,7 @@ export function MultiSplitJourneyCard({
   quota?: string;
   autoFetchLive?: boolean;
   rank?: number;
+  fetchDelay?: number;
 }) {
   const legs = split.legs || [];
   const [routeTrain, setRouteTrain] = useState<any | null>(null);
@@ -3467,11 +3470,12 @@ export function MultiSplitJourneyCard({
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700 dark:bg-white/10 dark:text-slate-200">{leg.classType || "3A"}</span>
             </div>
 	            <ClassRateStrip
-	              train={leg}
-	              journeyDate={trainJourneyDate(leg, journeyDate)}
+              train={leg}
+              journeyDate={trainJourneyDate(leg, journeyDate)}
               selectedClass={classPanel && classPanel.train?.trainNo === leg.trainNo ? classPanel.classCode : scopedClass && scopedClass !== "ANY" ? scopedClass : undefined}
               quota={quota}
               autoFetchSelected={autoFetchLive}
+              fetchDelay={fetchDelay + index * 1500}
               onSelect={(selection) => setClassPanel({ ...selection, label: `Journey ${index + 1} · ${selection.classCode}` })}
               onQuotesFetched={handleLegQuotesFetched}
             />
