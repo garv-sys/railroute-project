@@ -230,12 +230,8 @@ export function TrainResultsWorkspace() {
         return false;
       }
 
-      // 3. Both legs returning no fare after retry -> remove entire split card
-      const f1 = selectedSortClass ? classFareAmount(split.leg1, selectedSortClass) : trainFareAmount(split.leg1);
-      const f2 = selectedSortClass ? classFareAmount(split.leg2, selectedSortClass) : trainFareAmount(split.leg2);
-      if (!f1 && !f2 && !split.totalFare) {
-        return false;
-      }
+      // Note: fares may be 0 if live API key not configured; show the route anyway
+
       // Search query filter for splits
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();

@@ -2301,18 +2301,6 @@ export async function searchTrainsSmart(source: string, dest: string, date: stri
     }
     trains = trains.filter((train) => trainMatchesSearchScope(train, source, dest));
 
-    // If we found very few trains (or none), supplement with mock trains as a last-resort fallback
-    // This ensures users always see options even when live API and local data both have limited coverage
-    if (trains.length < 4) {
-      const mockTrains = generateMockTrainsLocal(source, dest, date);
-      const existingNos = new Set(trains.map((t: any) => String(t.train_no || t.trainNo || '')));
-      const newMocks = mockTrains.filter((t: any) => !existingNos.has(String(t.train_no || '')));
-      trains = [...trains, ...newMocks];
-      if (newMocks.length > 0) {
-        logProviderIssue('supplemented with mock trains due to sparse coverage', { source, dest, date, localCount: trains.length - newMocks.length, mockCount: newMocks.length });
-      }
-    }
-
     if (!trains.length) {
       logProviderIssue('no matching trains after station-leg filter', { source, dest, date });
     }
@@ -3012,18 +3000,6 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       ]);
       let f1 = safeParseFare(e1.fare);
       let f2 = safeParseFare(e2.fare);
-
-      // Fallback policy: never discard routes because live fare is 0 (e.g. key missing)
-      if (f1 === 0) {
-        f1 = getFallbackMockFare(e1.trainNo, e1.source, e1.destination, classType || '3A');
-        e1.fare = `₹${f1}`;
-        console.log(`[TRACER] [findSmartRoutesForDate] Validation: e1 fare for ${e1.trainNo} was zero/unavailable. Applied fallback mock fare of ₹${f1}.`);
-      }
-      if (f2 === 0) {
-        f2 = getFallbackMockFare(e2.trainNo, e2.source, e2.destination, classType || '3A');
-        e2.fare = `₹${f2}`;
-        console.log(`[TRACER] [findSmartRoutesForDate] Validation: e2 fare for ${e2.trainNo} was zero/unavailable. Applied fallback mock fare of ₹${f2}.`);
-      }
 
       const l1Arr = e1.arrivalTime || '';
       const l2Dep = e2.departureTime || '';

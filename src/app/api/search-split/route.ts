@@ -193,16 +193,8 @@ export async function POST(request: Request) {
     }
 
     const finalRoutes = diverseRoutes.map(route => {
-      let f1 = parseFareVal(route.leg1?.fare);
-      let f2 = parseFareVal(route.leg2?.fare);
-      if (f1 === 0) {
-        f1 = getFallbackMockFare(route.leg1?.trainNo, route.leg1?.source, route.leg1?.destination, classType || '3A');
-        if (route.leg1) route.leg1.fare = `₹${f1}`;
-      }
-      if (f2 === 0) {
-        f2 = getFallbackMockFare(route.leg2?.trainNo, route.leg2?.source, route.leg2?.destination, classType || '3A');
-        if (route.leg2) route.leg2.fare = `₹${f2}`;
-      }
+      const f1 = parseFareVal(route.leg1?.fare);
+      const f2 = parseFareVal(route.leg2?.fare);
       route.totalFare = f1 + f2;
       return route;
     });
@@ -220,9 +212,9 @@ export async function POST(request: Request) {
       });
     }
 
-    let filteredSplitRoutes = finalRoutes.slice(0, 30);
+    let filteredSplitRoutes = finalRoutes.slice(0, 15);
 
-    if (filteredSplitRoutes.length < 30) {
+    if (filteredSplitRoutes.length < 15) {
       console.log('[search-split] Need more routes, trying expanded search on original date only');
       const retryOptions = {
         ...plannerOptions,
@@ -237,23 +229,15 @@ export async function POST(request: Request) {
       const existingKeys = new Set(filteredSplitRoutes.map(r => `${r.leg1?.trainNo}_${r.hubStation}_${r.leg2?.trainNo}`));
 
       for (const route of retryDiverse) {
-        if (filteredSplitRoutes.length >= 30) break;
+        if (filteredSplitRoutes.length >= 15) break;
         const key = `${route.leg1?.trainNo}_${route.hubStation}_${route.leg2?.trainNo}`;
         if (existingKeys.has(key)) continue;
         
         if (isLegBlocked(route.leg1)) continue;
         if (isLegBlocked(route.leg2)) continue;
         
-        let f1 = parseFareVal(route.leg1?.fare);
-        let f2 = parseFareVal(route.leg2?.fare);
-        if (f1 === 0) {
-          f1 = getFallbackMockFare(route.leg1?.trainNo, route.leg1?.source, route.leg1?.destination, classType || '3A');
-          if (route.leg1) route.leg1.fare = `₹${f1}`;
-        }
-        if (f2 === 0) {
-          f2 = getFallbackMockFare(route.leg2?.trainNo, route.leg2?.source, route.leg2?.destination, classType || '3A');
-          if (route.leg2) route.leg2.fare = `₹${f2}`;
-        }
+        const f1 = parseFareVal(route.leg1?.fare);
+        const f2 = parseFareVal(route.leg2?.fare);
         route.totalFare = f1 + f2;
 
         filteredSplitRoutes.push(route);
@@ -261,7 +245,7 @@ export async function POST(request: Request) {
       }
     }
 
-    filteredSplitRoutes = filteredSplitRoutes.slice(0, 30);
+    filteredSplitRoutes = filteredSplitRoutes.slice(0, 15);
     // Final ranking: highest confirmation chance first, then score, then lowest fare
     filteredSplitRoutes.sort((a: any, b: any) => {
       const chanceDiff = (b.combinedConfirmationChance ?? 0) - (a.combinedConfirmationChance ?? 0);
