@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "src/app/api/search-split/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/train-between/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/search-split-enrich/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/search-split-candidates/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}

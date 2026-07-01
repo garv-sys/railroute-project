@@ -70,8 +70,8 @@ export async function POST(request: Request) {
       maxMultiLegOptions: 8,
       maxMultiCandidates: 150,
       maxMultiResults: 20,
-      plannerLegTimeoutMs: 3500,
-      globalTimeoutMs: 25000,
+      plannerLegTimeoutMs: 8000,
+      globalTimeoutMs: 40000,
     } as const;
 
     const [splitRoutes, multiSplitRoutes] = await Promise.all([
@@ -161,8 +161,8 @@ export async function POST(request: Request) {
     // Always enrich at least the top 15 splits with live data so fares and availability show
     const LIVE_TOP_SPLIT = Math.min(diverseRoutes.length, 15);
     if (LIVE_TOP_SPLIT > 0) {
-      const enrichDeadlineMs = 20000;
-      const perRouteTimeoutMs = 15000;
+      const enrichDeadlineMs = 45000;
+      const perRouteTimeoutMs = 20000;
 
       const enrichRoute = async (route: any) => {
         const legDate = route.leg1Date || route.leg2Date || date;
