@@ -2740,8 +2740,12 @@ export async function enrichSplitCandidates(
       let depMs = parseTime(l2Dep, formattedDate).getTime();
       while (depMs < arrivalMs) depMs += 86400000;
       const layoverHrs = (depMs - arrivalMs) / 3600000;
-      if (layoverHrs < 0 || layoverHrs > 24) {
-        console.log(`[TRACER] Validation: Rejected route "${routeString}" during enrichment - layover of ${layoverHrs.toFixed(1)}h is outside [0, 24] range.`);
+      
+      const isSameStation = String(e1.destination || "").toUpperCase().trim() === String(e2.source || "").toUpperCase().trim();
+      const minLayoverHrs = isSameStation ? 0.5 : 1.5;
+      
+      if (layoverHrs < minLayoverHrs || layoverHrs > 24) {
+        console.log(`[TRACER] Validation: Rejected route "${routeString}" during enrichment - layover of ${layoverHrs.toFixed(2)}h is outside [${minLayoverHrs}, 24] range.`);
         continue;
       }
 
@@ -2908,8 +2912,12 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       let depMs = parseTime(l2Dep, formattedDate).getTime();
       while (depMs < arrivalMs) depMs += 86400000;
       const layoverHrs = (depMs - arrivalMs) / 3600000;
-      if (layoverHrs < 0 || layoverHrs > 24) {
-        console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - layover ${layoverHrs.toFixed(1)}h is outside [0, 24] range.`);
+      
+      const isSameStation = String(e1.destination || "").toUpperCase().trim() === String(e2.source || "").toUpperCase().trim();
+      const minLayoverHrs = isSameStation ? 0.5 : 1.5;
+      
+      if (layoverHrs < minLayoverHrs || layoverHrs > 24) {
+        console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - layover ${layoverHrs.toFixed(2)}h is outside [${minLayoverHrs}, 24] range.`);
         continue;
       }
       const c1 = e1.confirmationChance !== undefined ? e1.confirmationChance : 100;
