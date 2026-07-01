@@ -38,32 +38,32 @@ export const TRAIN_BETWEEN_CACHE_TTL_MS = 5 * 60 * 1000;
 export const ROUTE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 const providerCache = new ProviderCache({
-  maxConcurrency: 3,
-  retryCount: 1,
+  maxConcurrency: 20,
+  retryCount: 3,
   retryDelayMs: 1500,
   failureTtlMs: 30_000,
   staleWhileRevalidateMultiplier: 4,
-  timeoutMs: 20_000,
+  timeoutMs: 40_000,
   loggerPrefix: 'irctc-connect',
 });
 
 const availabilityCache = new ProviderCache({
-  maxConcurrency: 2,
-  retryCount: 0,
-  retryDelayMs: 1000,
+  maxConcurrency: 25,
+  retryCount: 3,
+  retryDelayMs: 2000,
   failureTtlMs: 0,
   staleWhileRevalidateMultiplier: 1,
-  timeoutMs: 7500,
+  timeoutMs: 35_000,
   loggerPrefix: 'irctc-connect-availability',
 });
 
 const trainListCache = new ProviderCache({
-  maxConcurrency: 12,
-  retryCount: 0,
-  retryDelayMs: 750,
+  maxConcurrency: 30,
+  retryCount: 2,
+  retryDelayMs: 1000,
   failureTtlMs: 10_000,
   staleWhileRevalidateMultiplier: 1,
-  timeoutMs: 5000,
+  timeoutMs: 15_000,
   loggerPrefix: 'irctc-connect-train-list',
 });
 
@@ -137,8 +137,8 @@ class APIQueue {
   }
 }
 
-const irctcQueue = new APIQueue(4, 200);
-const trainListQueue = new APIQueue(12, 40);
+const irctcQueue = new APIQueue(20, 100);
+const trainListQueue = new APIQueue(30, 40);
 let availabilityCooldownUntil = 0;
 let trainListCooldownUntil = 0;
 

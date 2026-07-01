@@ -1450,31 +1450,24 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
     availabilityStatusInput?: LookupTrustStatus,
     fareStatusInput?: LookupTrustStatus
   ): ClassAvailabilityItem => {
+    const isDemoMode = !process.env.IRCTC_API_KEY;
     const finalFare = fare > 0 ? fare : getFallbackMockFare(trainNo, source, destination, classCode);
-    const runs = !notRunning;
-    
-    const statuses = ['AVAILABLE', 'AVAILABLE', 'RAC-5', 'WL-12', 'AVAILABLE', 'WL-3'];
-    const seed = date.getDate() + date.getMonth() + date.getFullYear() + (classCode.charCodeAt(0) || 0);
-    const statusText = runs ? statuses[seed % statuses.length] : 'Not Running';
-    const statusValue = runs ? (statusText.startsWith('AVAILABLE') ? 'AVAILABLE' : statusText.startsWith('RAC') ? 'RAC' : 'WL') : 'NOT_RUNNING';
-    const seatsValue = runs && statusValue === 'AVAILABLE' ? 12 + (seed % 28) : 0;
-    const chance = runs ? (statusValue === 'AVAILABLE' ? 100 : statusValue === 'RAC' ? 92 : 75) : 0;
-
-    const availabilityStatus: LookupTrustStatus = runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE';
-    const fareStatus: LookupTrustStatus = runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE';
-    const lookupReason = runs ? statusText : 'Not Running';
-
+    const availabilityStatus = notRunning
+      ? 'PROVIDER_UNAVAILABLE'
+      : availabilityStatusInput || lookupStatusFromReason(reason);
+    const fareStatus: LookupTrustStatus = fareStatusInput || (finalFare > 0 ? 'VERIFIED' : availabilityStatus);
+    const lookupReason = availabilityReasonForStatus(availabilityStatus, classCode, reason);
     return {
       dateStr: `${daysOfWeek[date.getDay()]}, ${String(date.getDate()).padStart(2, '0')} ${months[date.getMonth()]}`,
       rawDate: localIsoDate(date),
-      status: statusValue as any,
+      status,
       text: lookupReason,
-      seats: seatsValue,
+      seats: 0,
       fare: finalFare,
-      notRunning: !runs,
-      confirmationChance: chance,
+      notRunning,
+      confirmationChance: 0,
       fareBreakdown: { baseFare: finalFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: finalFare },
-      updatedTime: 'Verified live',
+      updatedTime: finalFare > 0 ? `${lookupReason}; ${fareReasonForStatus(fareStatus, reason)}` : lookupReason,
       availabilityStatus,
       fareStatus,
       lookupReason,

@@ -132,21 +132,6 @@ function fareFromProviderResponse(response: any) {
   return 0;
 }
 
-function getMockStatusForParams(trainNo: string, classCode: string, dateStr: string): { status: string; text: string; seats: number } {
-  let seed = 0;
-  for (let i = 0; i < trainNo.length; i++) {
-    seed += trainNo.charCodeAt(i);
-  }
-  for (let i = 0; i < dateStr.length; i++) {
-    seed += dateStr.charCodeAt(i);
-  }
-  const statuses = ['AVAILABLE', 'AVAILABLE', 'RAC-5', 'WL-12', 'AVAILABLE', 'WL-3'];
-  const text = statuses[seed % statuses.length];
-  const status = text.startsWith('AVAILABLE') ? 'AVAILABLE' : text.startsWith('RAC') ? 'RAC' : 'WL';
-  const seats = status === 'AVAILABLE' ? 12 + (seed % 28) : 0;
-  return { status, text, seats };
-}
-
 function unavailableResult(
   params: AvailabilityRequest,
   provider: string,
@@ -154,52 +139,40 @@ function unavailableResult(
   rawProviderResponse?: any,
   partial: { fare?: number; providerFare?: any; rawAvailabilityRows?: any[]; exactDate?: boolean } = {}
 ): AvailabilityServiceResult {
+  const status = lookupStatusFromReason(reason);
   const proof = makeLookupProof(params);
+  const availabilityText = availabilityReasonForStatus(status, params.classType, reason);
   const fallbackFare = partial.fare ?? getFallbackMockFare(params.trainNo, params.source, params.destination, params.classType);
-  const mock = getMockStatusForParams(params.trainNo, params.classType, params.date);
-
-  const row = {
-    date: params.date,
-    availabilityText: mock.text,
-    status: mock.text,
-    source: "date-specific-provider",
-    reason: "Verified live",
-    seats: mock.seats,
-    fare: fallbackFare,
-    availabilityStatus: "VERIFIED",
-    fareStatus: "VERIFIED",
-    lookupReason: "Verified live",
-    proof,
-  };
   
   return {
-    success: true,
-    provider: "irctc-connect",
+    success: false,
+    provider,
     rawProviderResponse,
     meta: buildTrustMeta({
-      source: "live",
-      provider: "irctc-connect",
-      isLive: true,
-      fallback: false,
+      source: "fallback",
+      provider,
+      isLive: false,
+      fallback: true,
+      warning: reason,
     }),
     data: {
       ...params,
-      availabilityText: mock.text,
-      status: mock.status as any,
-      seats: mock.seats,
-      availabilitySource: "date-specific-provider",
+      availabilityText,
+      status: "UNAVAILABLE",
+      seats: null,
+      availabilitySource: "unavailable",
       fare: fallbackFare,
-      fareSource: "date-specific-provider",
-      fareExactRequest: true,
-      exactDate: true,
-      availabilityStatus: "VERIFIED",
-      fareStatus: "VERIFIED",
-      lookupReason: "Verified live",
+      fareSource: "estimated",
+      fareExactRequest: false,
+      exactDate: false,
+      availabilityStatus: status,
+      fareStatus: status,
+      lookupReason: reason,
       proof,
-      reason: "Verified live",
-      provider: "irctc-connect",
-      rawAvailabilityRows: [row],
-      providerFare: { totalFare: fallbackFare },
+      reason,
+      provider,
+      rawAvailabilityRows: partial.rawAvailabilityRows || [],
+      providerFare: partial.providerFare || null,
     },
   };
 }
