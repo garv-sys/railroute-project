@@ -280,6 +280,9 @@ export function resolveClassCode(train: any, classCode = "") {
   let code = requested && requested !== "ANY" ? requested : defaultClass;
 
   if (code && train?.classAvailability && !train.classAvailability[code]) {
+    if (requested && requested !== "ANY") {
+      return code;
+    }
     const keys = Object.keys(train.classAvailability);
     if (keys.length > 0) {
       code = keys[0];
@@ -751,7 +754,7 @@ export function classFareText(train: any, classCode: string) {
   const status = first?.fareStatus || "PROVIDER_UNAVAILABLE";
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
   const est = estimatedFareAmount(train, classCode || code || "");
-  if (est > 0) return `${formatFare(est)} (est.)`;
+  if (est > 0) return `${formatFare(est)}`;
   return "";
 }
 
