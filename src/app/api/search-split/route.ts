@@ -155,17 +155,17 @@ export async function POST(request: Request) {
       return selected;
     };
 
-    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 30);
+    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 40);
     console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
     const verifiedRoutes: any[] = [];
     const unverifiedRoutes: any[] = [];
 
-    const LIVE_TOP_SPLIT = mode === 'quick' ? 0 : diverseRoutes.length;
+    const LIVE_TOP_SPLIT = diverseRoutes.length;
     if (LIVE_TOP_SPLIT > 0) {
       const enrichDeadlineMs = 38000;
       const perRouteTimeoutMs = 12000;
-      const batchSize = 3;
+      const batchSize = 10;
 
       for (let i = 0; i < diverseRoutes.length && verifiedRoutes.length < 15; i += batchSize) {
         const elapsed = Date.now() - apiStartTime;
@@ -321,7 +321,7 @@ export async function POST(request: Request) {
     });
     console.log('[search-split] FINAL filteredSplitRoutes:', filteredSplitRoutes.length);
 
-    const LIVE_TOP_MULTI = mode === 'quick' ? 0 : Math.min(15, multiSplitRoutes.length);
+    const LIVE_TOP_MULTI = Math.min(15, multiSplitRoutes.length);
     if (LIVE_TOP_MULTI > 0) {
       const promises = multiSplitRoutes.slice(0, LIVE_TOP_MULTI).map(async (route, index) => {
         const legs = route.legs || [];

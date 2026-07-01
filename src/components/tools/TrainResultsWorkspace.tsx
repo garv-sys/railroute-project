@@ -217,6 +217,11 @@ export function TrainResultsWorkspace() {
     const fareLimit = Number(maxFare) || Infinity;
     const durationLimit = maxDuration ? Number(maxDuration) * 60 : Infinity;
     return dedupeSplitRoutes(state.splits).filter((split) => {
+      // Only keep splits that have verified fare and seat availability on both legs (no estimated/unverified rows)
+      if (!splitHasVerifiedFareAndSeats(split, selectedSortClass)) {
+        return false;
+      }
+
       // 2. "Not bookable on this date" for selected class on either leg -> remove entire split card
       const isNotBookableLeg = (leg: any) => {
         const code = resolveClassCode(leg, selectedSortClass || "");
@@ -294,74 +299,8 @@ export function TrainResultsWorkspace() {
     });
   }, [confirmedOnly, maxDuration, maxFare, selectedSortClass, sortBy, state.splits, searchQuery]);
   const visibleTrains = useMemo(() => {
-    const verified = filteredTrains;
-    const verifiedKeys = new Set(verified.map((t) => `${t.trainNo}-${t.source}-${t.destination}`));
-    let unverified = state.trains.filter((t) => {
-      if (verifiedKeys.has(`${t.trainNo}-${t.source}-${t.destination}`)) {
-        return false;
-      }
-      
-      // Apply filters to unverified trains to ensure they match search criteria
-      // 1. Check if verified-unbookable
-      const requested = String(selectedSortClass || "").toUpperCase().trim();
-      const classCode = requested && requested !== "ANY" ? requested : primaryClassCode(t);
-      const first = classCode ? t?.classAvailability?.[classCode]?.[0] : undefined;
-      const availabilityStatus = first?.availabilityStatus || t?.availabilityStatus;
-      const fareStatus = first?.fareStatus || t?.fareStatus;
-      
-      const isChecked = availabilityStatus === "VERIFIED" && fareStatus === "VERIFIED";
-      
-      if (isChecked) {
-        if (!hasVerifiedFareAndSeat(t, selectedSortClass)) {
-          return false;
-        }
-      } else {
-        const rawAvail = String(t?.availability || "").toUpperCase();
-        const rawClassAvail = classCode ? String(t?.classAvailability?.[classCode]?.[0]?.text || "").toUpperCase() : rawAvail;
-        const rawStatus = rawClassAvail || rawAvail;
-        if (providerBookingBlockedText(rawStatus)) {
-          return false;
-        }
-      }
-      
-      // 2. Confirmed Only filter
-      if (confirmedOnly) {
-        const avail = String(t?.availability || "").toUpperCase();
-        const classAvail = classCode ? String(t?.classAvailability?.[classCode]?.[0]?.text || "").toUpperCase() : avail;
-        const status = classAvail || avail;
-        if (status && (/WL|RAC|WAITLIST/.test(status) || !/\bAVAILABLE\b|\bAVL\b|\bCNF\b|\bCONFIRM/.test(status)) && !/NOT_CHECKED|TAP TO CHECK|CHECK SEATS/i.test(status)) {
-          return false;
-        }
-      }
-      
-      // 3. Fare Limit filter
-      const fareLimit = Number(maxFare) || Infinity;
-      const fare = classCode ? classFareAmount(t, classCode) : trainFareAmount(t);
-      if (fare && fare > fareLimit) return false;
-      
-      // 4. Duration Limit filter
-      const durationLimit = maxDuration ? Number(maxDuration) * 60 : Infinity;
-      const duration = durationToMinutes(t.duration);
-      if (duration && duration > durationLimit) return false;
-      
-      return true;
-    });
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      unverified = unverified.filter((train) =>
-        String(train.trainName || "").toLowerCase().includes(q) || String(train.trainNo || "").toLowerCase().includes(q)
-      );
-    }
-    const sortedUnverified = [...unverified].sort((a, b) => {
-      const fareA = selectedSortClass ? classFareAmount(a, selectedSortClass) : trainFareAmount(a);
-      const fareB = selectedSortClass ? classFareAmount(b, selectedSortClass) : trainFareAmount(b);
-      if (sortBy === "cheapest") return (fareA || Infinity) - (fareB || Infinity);
-      if (sortBy === "fastest") return durationToMinutes(a.duration) - durationToMinutes(b.duration);
-      return durationToMinutes(a.duration) - durationToMinutes(b.duration);
-    });
-    return [...verified, ...sortedUnverified];
-  }, [filteredTrains, state.trains, sortBy, selectedSortClass, searchQuery, confirmedOnly, maxFare, maxDuration]);
+    return filteredTrains.slice(0, 15);
+  }, [filteredTrains]);
 
   const visibleSplitRoutes = useMemo(() => {
     // Match backend limit of 15 so all returned results are shown
@@ -374,6 +313,11 @@ export function TrainResultsWorkspace() {
     return state.multiSplits.filter((split) => {
       const legs: any[] = split.legs || [];
       if (legs.length === 0) return false;
+
+      // Only show multi-split routes where ALL legs are verified (no estimated/unverified rows)
+      if (!multiSplitHasVerifiedFareAndSeats(split, selectedSortClass || "")) {
+        return false;
+      }
 
       // Filter out multi-splits where any leg is explicitly unbookable
       const isLegUnbookable = (leg: any) => {
@@ -625,7 +569,7 @@ export function TrainResultsWorkspace() {
       if (debug) params.set("debug", "true");
       window.history.pushState(null, "", `/trains?${params.toString()}`);
     }
-    setState({ loading: true, splitLoading: true, splitCoverage: "quick", error: "", trains: [], splits: [], multiSplits: [] });
+    setState({ loading: true, splitLoading: true, splitCoverage: "full", error: "", trains: [], splits: [], multiSplits: [] });
     try {
       let directCountForRequest = 0;
       let splitCountForRequest = 0;
@@ -657,7 +601,7 @@ export function TrainResultsWorkspace() {
       const forwardSplitPromise = postJson<any>("/api/search-split", {
         ...requestPayload,
         directTrains: [],
-        mode: "quick",
+        mode: "full",
       })
         .then((split) => {
           const splitRoutes = split?.splitRoutes || split?.data?.splitRoutes || [];
@@ -667,7 +611,7 @@ export function TrainResultsWorkspace() {
           setState((current) => ({
             ...current,
             splitLoading: false,
-            splitCoverage: "quick",
+            splitCoverage: "full",
             splits: splitRoutes,
             multiSplits: multiSplitRoutes,
           }));
@@ -686,7 +630,7 @@ export function TrainResultsWorkspace() {
           setState((current) => ({
             ...current,
             splitLoading: false,
-            splitCoverage: "quick",
+            splitCoverage: "full",
             splits: [],
             multiSplits: [],
           }));
@@ -724,7 +668,7 @@ export function TrainResultsWorkspace() {
         setState((current) => ({
           ...current,
           splitLoading: false,
-          splitCoverage: "quick",
+          splitCoverage: "full",
           splits: newSplits,
           multiSplits: newMultiSplits,
         }));

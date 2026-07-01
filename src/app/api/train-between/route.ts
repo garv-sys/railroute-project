@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       {
         debug: true,
         fetchLive: true,
-        liveLookupLimit: 15,
+        liveLookupLimit: 40,
         fetchAllClasses: true,
         exactStationOnly: false,
         providerPairLimit: 20,
