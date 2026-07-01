@@ -2918,11 +2918,11 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         continue;
       }
 
-      // Per-hub diversity cap: each hub contributes at most 3 candidates to final pool
+      // Per-hub diversity cap: each hub contributes at most 6 candidates to final pool
       const hubCap = 6;
       let hubContrib = 0;
-      for (const t1 of filteredL1.slice(0, 8)) {
-        for (const t2 of filteredL2.slice(0, 8)) {
+      for (const t1 of filteredL1.slice(0, 15)) {
+        for (const t2 of filteredL2.slice(0, 15)) {
           if (hubContrib >= hubCap) break;
           const tn1 = cleanTrainNo(t1.trainNo || t1.train_no);
           const tn2 = cleanTrainNo(t2.trainNo || t2.train_no);
@@ -2930,6 +2930,24 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
             console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route SAME train: ${tn1}`);
             continue;
           }
+
+          // Pre-filter on layover time before enrichment to avoid filling slot with invalid timings
+          const l1Arr = t1.arrivalTime || t1.to_time || '';
+          const l2Dep = t2.departureTime || t2.from_time || '';
+          if (l1Arr && l2Dep) {
+            const arrivalMs = parseTime(l1Arr, formattedDate).getTime();
+            let depMs = parseTime(l2Dep, formattedDate).getTime();
+            while (depMs < arrivalMs) depMs += 86400000;
+            const layoverHrs = (depMs - arrivalMs) / 3600000;
+
+            const isSameStation = String(t1.destination || t1.to_stn_code || "").toUpperCase().trim() === String(t2.source || t2.from_stn_code || "").toUpperCase().trim();
+            const minLayoverHrs = isSameStation ? 0.5 : 1.5;
+
+            if (layoverHrs < minLayoverHrs || layoverHrs > 24) {
+              continue;
+            }
+          }
+
           const key = `${tn1}_${hub}_${tn2}`;
           if (seen.has(key)) continue;
           seen.add(key);
@@ -3040,7 +3058,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - enrichment exception:`, e);
     }
   }
-  const diverseResults = selectDiverseHubRoutes(results, 40);
+  const diverseResults = selectDiverseHubRoutes(results, 50);
   console.log(`[TRACER] [findSmartRoutesForDate] 5. Enrichment Finished: successfully enriched count=${diverseResults.length}`);
   return diverseResults;
 }

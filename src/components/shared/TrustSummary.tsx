@@ -765,6 +765,12 @@ export function classFareText(train: any, classCode: string) {
 export function hasVerifiedFareAndSeat(train: any, requestedClass = "") {
   const code = resolveClassCode(train, requestedClass);
   const first = code ? train?.classAvailability?.[code]?.[0] : undefined;
+  
+  const req = String(requestedClass || "").toUpperCase().trim();
+  if (req && req !== "ANY" && !first) {
+    return false;
+  }
+
   const availabilityStatus = first?.availabilityStatus || train?.availabilityStatus;
   const availability = readableRailStatus(first?.availabilityText || first?.text || first?.status || train?.availability);
   const upperAvailability = availability.toUpperCase();

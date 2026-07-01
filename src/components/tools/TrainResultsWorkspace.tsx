@@ -3083,6 +3083,7 @@ export function SplitJourneyCard({
             <p className="mt-1 text-xs font-bold leading-5 text-slate-500 dark:text-slate-400">
               Exact request: {routeCopy}
             </p>
+            <RunningDaysStrip train={leg} journeyDate={legJourneyDate} compact />
             {alternateTerminal && (
               <p className="mt-2 rounded-md border border-amber-300/40 bg-amber-50 px-2.5 py-1.5 text-[11px] font-black text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
                 Search leg was {requestedSource || "--"} → {requestedDestination || "--"}; provider-backed live check is {actualSource} → {actualDestination}.
