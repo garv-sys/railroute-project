@@ -375,14 +375,18 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
     if (rows.length === 0 || hasNoFare) {
       console.log('[fare-retry]', trainNo, fromStn, toStn, dateStr, normalizedClass);
       await new Promise((r) => setTimeout(r, 2000));
-      response = await callWithRetry(doFetch, 1, 'availability');
-      rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
-      fareObj = response?.data?.fare;
+      const retryResponse = await callWithRetry(doFetch, 1, 'availability');
+      const retryRows = Array.isArray(retryResponse?.data?.availability) ? retryResponse.data.availability : [];
+      const retryFareObj = retryResponse?.data?.fare;
+      // Only overwrite if the retry actually succeeded in getting rows
+      if (retryRows.length > 0) {
+        response = retryResponse;
+        rows = retryRows;
+        fareObj = retryFareObj;
+      }
     }
 
-    const finalHasNoFare = !fareObj || fareObj.totalFare === 0 || fareObj.Fare === 0 || fareObj.Amount === 0 || fareObj.total === 0;
-
-    if (rows.length === 0 || finalHasNoFare) {
+    if (rows.length === 0) {
       console.warn('[live-check-debug] Still empty after retry', { trainNo, fromStn, toStn, date: dateStr, classType: normalizedClass, rowCount: rows.length, fare: fareObj });
       return {
         success: false,

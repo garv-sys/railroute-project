@@ -756,13 +756,11 @@ export function hasVerifiedFareAndSeat(train: any, requestedClass = "") {
   const code = resolveClassCode(train, requestedClass);
   const first = code ? train?.classAvailability?.[code]?.[0] : undefined;
   const availabilityStatus = first?.availabilityStatus || train?.availabilityStatus;
-  const fareStatus = first?.fareStatus || train?.fareStatus;
-  const fare = fareToNumber(first?.fare ?? train?.fare);
   const availability = readableRailStatus(first?.availabilityText || first?.text || first?.status || train?.availability);
   const upperAvailability = availability.toUpperCase();
   const visibleSeatStatus = /\bAVAILABLE\b|\bAVL\b|RAC|WL|WAIT|REGRET|CNF|CONFIRM/.test(upperAvailability) &&
     !/NOT AVAILABLE|TRAIN NOT ON SCHEDULED DATE|NOT RUNNING|CLASS NOT AVAILABLE|CHECK SEATS|TAP TO CHECK|UNAVAILABLE/.test(upperAvailability);
-  return availabilityStatus === "VERIFIED" && fareStatus === "VERIFIED" && fare > 0 && visibleSeatStatus;
+  return availabilityStatus === "VERIFIED" && visibleSeatStatus;
 }
 
 export function splitHasVerifiedFareAndSeats(split: any, requestedClass = "") {
@@ -1024,6 +1022,7 @@ export function needsLiveQuotaRefresh(train: any, classCode: string) {
   const code = String(classCode || "").toUpperCase();
   const first = train?.classAvailability?.[code]?.[0];
   if (!first) return true;
+  if (first?.availabilityStatus === "VERIFIED") return false;
   if (first?.availabilityStatus === "NOT_CHECKED" || first?.fareStatus === "NOT_CHECKED") return true;
   if (first?.availabilityStatus === "RATE_LIMITED" || first?.fareStatus === "RATE_LIMITED") return true;
   if (first?.availabilityStatus === "PROVIDER_UNAVAILABLE" || first?.fareStatus === "PROVIDER_UNAVAILABLE") {

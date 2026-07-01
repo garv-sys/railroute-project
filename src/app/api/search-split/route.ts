@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     today.setHours(0, 0, 0, 0);
     const selectedDate = new Date(date);
     const daysFromToday = Math.round((selectedDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    if (daysFromToday < 0 || daysFromToday > MAX_BOOKING_DAYS) {
+    if (daysFromToday < -2 || daysFromToday > MAX_BOOKING_DAYS + 2) {
       return validationFailure('Booking window is 60 days. Please select an earlier date.', requestId);
     }
 

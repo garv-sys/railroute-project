@@ -2632,7 +2632,7 @@ export function ClassRateStrip({
         const fareText = classFareText(displayTrain, classCode);
         const fareVal = fareToNumber(fareText);
 
-        const hasData = quote && !error && quote.availabilityStatus === "VERIFIED" && quote.fare > 0;
+        const hasData = !!(quote && !error && !quote.error && quote.availabilityStatus === "VERIFIED");
         const selected = selectedClassCode === classCode;
         const routeCopy = `${liveSourceStation(train) || "--"} → ${liveDestinationStation(train) || "--"} · ${journeyDate || "--"} · ${classCode}`;
 
@@ -2704,7 +2704,7 @@ export function ClassRateStrip({
               <div className="flex flex-wrap items-center gap-2 text-xs font-black">
                 <span className="shrink-0 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-black text-white dark:bg-white dark:text-slate-950">{classCode}</span>
                 <span className="rounded-md border border-cyan-300 bg-white px-2.5 py-1 text-cyan-800 dark:border-cyan-400/30 dark:bg-slate-900 dark:text-cyan-100">
-                  Fare: ₹{quote.fare}
+                  Fare: {quote.fare > 0 ? `₹${quote.fare}` : "N/A"}
                 </span>
                 <span className={`rounded-md border px-2.5 py-1 ${availabilityTone(rawStatus)}`}>
                   Availability: {formattedAvail || rawStatus}
