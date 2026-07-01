@@ -155,7 +155,7 @@ export async function POST(request: Request) {
       return selected;
     };
 
-    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 40);
+    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 50);
     console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
     const verifiedRoutes: any[] = [];
@@ -165,7 +165,7 @@ export async function POST(request: Request) {
     if (LIVE_TOP_SPLIT > 0) {
       const enrichDeadlineMs = 38000;
       const perRouteTimeoutMs = 12000;
-      const batchSize = 10;
+      const batchSize = 15;
 
       for (let i = 0; i < diverseRoutes.length && verifiedRoutes.length < 15; i += batchSize) {
         const elapsed = Date.now() - apiStartTime;
