@@ -142,6 +142,7 @@ function unavailableResult(
   const status = lookupStatusFromReason(reason);
   const proof = makeLookupProof(params);
   const availabilityText = availabilityReasonForStatus(status, params.classType, reason);
+  const fallbackFare = partial.fare ?? getFallbackMockFare(params.trainNo, params.source, params.destination, params.classType);
   
   return {
     success: false,
@@ -160,8 +161,8 @@ function unavailableResult(
       status: "UNAVAILABLE",
       seats: null,
       availabilitySource: "unavailable",
-      fare: null,
-      fareSource: "unavailable",
+      fare: fallbackFare,
+      fareSource: "estimated",
       fareExactRequest: false,
       exactDate: false,
       availabilityStatus: status,

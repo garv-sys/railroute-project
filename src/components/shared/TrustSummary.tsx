@@ -266,11 +266,12 @@ export function lookupStatusLabel(status: LookupTrustStatus | undefined, kind: "
   const code = classCode ? ` for ${classCode}` : "";
   const detail = String(reason || "").trim();
   if (status === "VERIFIED") return kind === "fare" ? "Provider returned fare" : `Live availability confirmed${code}`;
-  if (status === "NOT_CHECKED") return kind === "fare" ? "" : "";
-  if (status === "RATE_LIMITED") return kind === "fare" ? "" : "";
-  if (status === "CACHE_ONLY") return kind === "fare" ? "" : "";
-  if (detail && !/live data unavailable|live fare unavailable|rate.?limit|too many requests|429|provider did not return/i.test(detail)) return detail;
-  return kind === "fare" ? "" : "";
+  if (status === "RATE_LIMITED") return kind === "fare" ? "Rate limited" : "Rate limit exceeded";
+  if (status === "PROVIDER_UNAVAILABLE") return kind === "fare" ? "Provider unavailable" : "Provider unavailable";
+  if (status === "NOT_CHECKED") return kind === "fare" ? "Check fare" : "Check seats";
+  if (status === "CACHE_ONLY") return kind === "fare" ? "Cached fare" : "Cached seats";
+  if (detail) return detail;
+  return kind === "fare" ? "Fare unavailable" : "Availability unavailable";
 }
 
 export function resolveClassCode(train: any, classCode = "") {
@@ -550,7 +551,10 @@ export function liveSeatText(train: any) {
 export function liveFareText(train: any) {
   const fare = fareToNumber(train?.fare);
   const status = trainFareStatus(train);
-  if (fare > 0 && status === "VERIFIED") return formatFare(fare);
+  if (fare > 0) {
+    if (status === "VERIFIED") return formatFare(fare);
+    return `${formatFare(fare)} (est.)`;
+  }
   return "";
 }
 
@@ -670,7 +674,7 @@ export function compactFareText(value: unknown) {
 export function compactSeatText(train: any) {
   const text = liveSeatText(train);
   if (/not requested|check availability|tap class|tap to check seats/i.test(text)) return "";
-  if (/tap to retry|failed to fetch|fetch failed|provider request failed|request failed|provider did not return|availability unavailable|timed out|request timed out|error|unavailable/i.test(text)) return "";
+  if (/tap to retry|failed to fetch|fetch failed|provider request failed|request failed|provider did not return|availability unavailable|timed out|request timed out|error/i.test(text)) return "";
   return text;
 }
 
@@ -865,7 +869,7 @@ export function liveQuoteFromResponse(response: any, classCode: string, journeyD
     providerFare
       ? fareToNumber(providerFare.totalFare ?? providerFare.Fare ?? providerFare.Amount ?? providerFare)
       : 0;
-  const fare = providerFareIsExact || (fareAmt > 0 && response?.data?.fareStatus === "VERIFIED") ? fareAmt : 0;
+  const fare = fareAmt > 0 ? fareAmt : 0;
   const providerWarning = response?.warning || response?.extra?.warning || response?.meta?.warning || "";
   const responseAvailabilityStatus = response?.data?.availabilityStatus as LookupTrustStatus | undefined;
   const responseFareStatus = response?.data?.fareStatus as LookupTrustStatus | undefined;
@@ -1000,7 +1004,7 @@ export function applyLiveQuoteToTrain(train: any, classCode: string, quote?: Liv
   return {
     ...train,
     availability: isPrimary ? quote.availability : train.availability,
-    fare: isPrimary ? (fare && fareStatus === "VERIFIED" ? `₹${fare}` : lookupStatusLabel(quote.fareStatus || "PROVIDER_UNAVAILABLE", "fare", code, quote.lookupReason || quote.error)) : train.fare,
+    fare: isPrimary ? (fare ? (fareStatus === "VERIFIED" ? `₹${fare}` : `₹${fare} (est.)`) : lookupStatusLabel(quote.fareStatus || "PROVIDER_UNAVAILABLE", "fare", code, quote.lookupReason || quote.error)) : train.fare,
     classType: nextClassType,
     classes: nextClasses,
     availabilityStatus: isPrimary ? quote.availabilityStatus : train.availabilityStatus,

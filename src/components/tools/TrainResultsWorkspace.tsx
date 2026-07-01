@@ -2626,13 +2626,13 @@ export function ClassRateStrip({
         const quote = quotes[classCode];
         const error = errors[classCode];
         const needsFetch = needsLiveQuotaRefresh(displayTrain, classCode);
-        const loading = loadingClass === classCode || (needsFetch && autoFetchSelected);
+        const loading = loadingClass === classCode || (needsFetch && autoFetchSelected && !quote && !error);
 
         const rawStatus = classAvailabilityStatus(displayTrain, classCode);
         const fareText = classFareText(displayTrain, classCode);
         const fareVal = fareToNumber(fareText);
 
-        const hasData = !!(quote && !error && !quote.error && quote.availabilityStatus === "VERIFIED");
+        const hasData = !!(quote && !error && !quote.error);
         const selected = selectedClassCode === classCode;
         const routeCopy = `${liveSourceStation(train) || "--"} → ${liveDestinationStation(train) || "--"} · ${journeyDate || "--"} · ${classCode}`;
 
@@ -2709,8 +2709,18 @@ export function ClassRateStrip({
                 <span className={`rounded-md border px-2.5 py-1 ${availabilityTone(rawStatus)}`}>
                   Availability: {formattedAvail || rawStatus}
                 </span>
-                <span className="rounded-md bg-emerald-600 px-2.5 py-1 text-[10px] uppercase text-white">
-                  PROVIDER-BACKED
+                <span className={`rounded-md px-2.5 py-1 text-[10px] uppercase text-white ${
+                  quote.availabilityStatus === "VERIFIED"
+                    ? "bg-emerald-600"
+                    : quote.availabilityStatus === "RATE_LIMITED"
+                    ? "bg-amber-600 animate-pulse"
+                    : "bg-slate-500"
+                }`}>
+                  {quote.availabilityStatus === "VERIFIED"
+                    ? "PROVIDER-BACKED"
+                    : quote.availabilityStatus === "RATE_LIMITED"
+                    ? "RATE LIMITED"
+                    : "ESTIMATED"}
                 </span>
               </div>
               <div className="mt-2 truncate text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">

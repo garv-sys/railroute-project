@@ -155,46 +155,106 @@ export async function POST(request: Request) {
       return selected;
     };
 
-    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 80);
+    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 30);
     console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
-    const LIVE_TOP_SPLIT = mode === 'quick' ? 0 : Math.min(diverseRoutes.length, 15);
+    const verifiedRoutes: any[] = [];
+    const unverifiedRoutes: any[] = [];
+
+    const LIVE_TOP_SPLIT = mode === 'quick' ? 0 : diverseRoutes.length;
     if (LIVE_TOP_SPLIT > 0) {
-      const enrichDeadlineMs = 45000;
-      const perRouteTimeoutMs = 20000;
+      const enrichDeadlineMs = 38000;
+      const perRouteTimeoutMs = 12000;
+      const batchSize = 3;
 
-      const enrichRoute = async (route: any) => {
-        const legDate = route.leg1Date || route.leg2Date || date;
-        try {
-          const [leg1Enriched, leg2Enriched] = await Promise.all([
-            withTimeout(
-              enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
-              perRouteTimeoutMs,
-              route.leg1
-            ),
-            withTimeout(
-              enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
-              perRouteTimeoutMs,
-              route.leg2
-            ),
-          ]);
-          if (leg1Enriched?.trainNo) route.leg1 = leg1Enriched;
-          if (leg2Enriched?.trainNo) route.leg2 = leg2Enriched;
-        } catch (e) {
-          console.warn(`[search-split] Enrichment failed for ${route.leg1?.trainNo}-${route.hubStation}-${route.leg2?.trainNo}:`, e);
+      for (let i = 0; i < diverseRoutes.length && verifiedRoutes.length < 15; i += batchSize) {
+        const elapsed = Date.now() - apiStartTime;
+        if (elapsed > enrichDeadlineMs) {
+          console.log(`[search-split] Stopping enrichment early to prevent timeout. Elapsed: ${elapsed}ms`);
+          break;
         }
-      };
 
-      const timeRemaining = Math.max(2000, enrichDeadlineMs - (Date.now() - apiStartTime));
-      await Promise.race([
-        Promise.all(diverseRoutes.slice(0, LIVE_TOP_SPLIT).map(enrichRoute)),
-        new Promise((resolve) => setTimeout(resolve, timeRemaining))
-      ]);
+        const batch = diverseRoutes.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (route) => {
+          const legDate = route.leg1Date || route.leg2Date || date;
+          try {
+            const [leg1Enriched, leg2Enriched] = await Promise.all([
+              withTimeout(
+                enrichWithLiveAvailability(route.leg1, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
+                perRouteTimeoutMs,
+                route.leg1
+              ),
+              withTimeout(
+                enrichWithLiveAvailability(route.leg2, legDate, classType, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
+                perRouteTimeoutMs,
+                route.leg2
+              ),
+            ]);
+            if (leg1Enriched?.trainNo) route.leg1 = leg1Enriched;
+            if (leg2Enriched?.trainNo) route.leg2 = leg2Enriched;
+
+            // Normalize and apply fallback fares if live lookup failed/returned 0
+            let f1 = parseFareVal(route.leg1?.fare);
+            let f2 = parseFareVal(route.leg2?.fare);
+            if (f1 === 0) {
+              f1 = getFallbackMockFare(route.leg1?.trainNo, route.leg1?.source, route.leg1?.destination, classType || '3A');
+              if (route.leg1) {
+                route.leg1.fare = `₹${f1}`;
+                route.leg1.fareStatus = 'estimated';
+              }
+            }
+            if (f2 === 0) {
+              f2 = getFallbackMockFare(route.leg2?.trainNo, route.leg2?.source, route.leg2?.destination, classType || '3A');
+              if (route.leg2) {
+                route.leg2.fare = `₹${f2}`;
+                route.leg2.fareStatus = 'estimated';
+              }
+            }
+            route.totalFare = f1 + f2;
+
+            const isLeg1Verified = route.leg1?.availabilityStatus === 'VERIFIED';
+            const isLeg2Verified = route.leg2?.availabilityStatus === 'VERIFIED';
+
+            if (isLeg1Verified && isLeg2Verified) {
+              verifiedRoutes.push(route);
+            } else {
+              unverifiedRoutes.push(route);
+            }
+          } catch (e) {
+            console.warn(`[search-split] Enrichment failed for ${route.leg1?.trainNo}-${route.hubStation}-${route.leg2?.trainNo}:`, e);
+            unverifiedRoutes.push(route);
+          }
+        }));
+      }
+
+      // Add remaining unenriched routes from diverseRoutes to unverifiedRoutes
+      const enrichedSet = new Set([...verifiedRoutes, ...unverifiedRoutes]);
+      for (const route of diverseRoutes) {
+        if (!enrichedSet.has(route)) {
+          unverifiedRoutes.push(route);
+        }
+      }
+    } else {
+      unverifiedRoutes.push(...diverseRoutes);
     }
 
-    const finalRoutes = diverseRoutes.map(route => {
-      const f1 = parseFareVal(route.leg1?.fare);
-      const f2 = parseFareVal(route.leg2?.fare);
+    const finalRoutes = [...verifiedRoutes, ...unverifiedRoutes].map(route => {
+      let f1 = parseFareVal(route.leg1?.fare);
+      let f2 = parseFareVal(route.leg2?.fare);
+      if (f1 === 0) {
+        f1 = getFallbackMockFare(route.leg1?.trainNo, route.leg1?.source, route.leg1?.destination, classType || '3A');
+        if (route.leg1) {
+          route.leg1.fare = `₹${f1}`;
+          route.leg1.fareStatus = 'estimated';
+        }
+      }
+      if (f2 === 0) {
+        f2 = getFallbackMockFare(route.leg2?.trainNo, route.leg2?.source, route.leg2?.destination, classType || '3A');
+        if (route.leg2) {
+          route.leg2.fare = `₹${f2}`;
+          route.leg2.fareStatus = 'estimated';
+        }
+      }
       route.totalFare = f1 + f2;
       return route;
     });
@@ -248,6 +308,11 @@ export async function POST(request: Request) {
     filteredSplitRoutes = filteredSplitRoutes.slice(0, 15);
     // Final ranking: highest confirmation chance first, then score, then lowest fare
     filteredSplitRoutes.sort((a: any, b: any) => {
+      const aVerified = a.leg1?.availabilityStatus === 'VERIFIED' && a.leg2?.availabilityStatus === 'VERIFIED';
+      const bVerified = b.leg1?.availabilityStatus === 'VERIFIED' && b.leg2?.availabilityStatus === 'VERIFIED';
+      if (aVerified && !bVerified) return -1;
+      if (!aVerified && bVerified) return 1;
+
       const chanceDiff = (b.combinedConfirmationChance ?? 0) - (a.combinedConfirmationChance ?? 0);
       if (chanceDiff !== 0) return chanceDiff;
       const scoreDiff = (b.score ?? 0) - (a.score ?? 0);

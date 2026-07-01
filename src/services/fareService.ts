@@ -8,6 +8,7 @@ import {
 } from "@/services/availabilityService";
 import { buildTrustMeta, type TrustMeta } from "@/lib/confidence";
 import { fareReasonForStatus, type LookupProof, type LookupTrustStatus } from "@/lib/railway-trust";
+import { getFallbackMockFare } from "@/services/trainService";
 
 export const fareRequestSchema = availabilityRequestSchema.extend({
   classType: z.string().trim().min(1).transform((value) => value.toUpperCase()).default("ALL"),
@@ -85,6 +86,7 @@ export async function getVerifiedFare(input: unknown): Promise<FareServiceResult
         return await getVerifiedAvailability({ ...params, classType: classCode });
       } catch (err: any) {
         console.warn(`[fareService] getVerifiedAvailability failed for class ${classCode}:`, err?.message || err);
+        const fallbackFare = getFallbackMockFare(params.trainNo, params.source, params.destination, classCode);
         // Return a minimal unavailable result so one failure doesn't blank the whole fare table
         return {
           success: false,
@@ -95,8 +97,8 @@ export async function getVerifiedFare(input: unknown): Promise<FareServiceResult
             status: 'UNAVAILABLE' as const,
             seats: null,
             availabilitySource: 'unavailable' as const,
-            fare: null,
-            fareSource: 'unavailable' as const,
+            fare: fallbackFare,
+            fareSource: 'estimated' as const,
             fareExactRequest: false,
             exactDate: false,
             availabilityStatus: 'PROVIDER_UNAVAILABLE' as const,

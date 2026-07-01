@@ -26,30 +26,14 @@ export async function POST(request: Request) {
 	    const result = await getVerifiedAvailability(body);
 	    const debug = body?.debug === true || body?.debug === "true";
 	    if (!result.success) {
-	      const isRateLimit = result.data?.availabilityStatus === "RATE_LIMITED" || /rate|429|limit/i.test(result.data?.reason || "");
-	      const status = isRateLimit ? 429 : 400;
-	      return apiFailure({
-	        error: result.data?.reason || "Provider request failed",
-	        requestId,
-	        status,
-	        provider: result.provider,
-	        warning: result.meta?.warning,
-	        extra: {
-	          debugTrace: result.rawProviderResponse ? {
-	            providerSource: result.provider,
-	            apiEndpoint: `availability:${result.data?.trainNo}:${result.data?.source}:${result.data?.destination}:${result.data?.date}:${result.data?.classType}:${result.data?.quota}`,
-	            selectedClass: result.data?.classType,
-	            providerReturnedClass: result.data?.classType,
-	            availabilityResponse: result.rawProviderResponse?.data?.availability ?? null,
-	            fareResponse: result.rawProviderResponse?.data?.fare ?? null,
-	            rawResponse: result.rawProviderResponse,
-	            mappedResponse: result.data,
-	            renderedResponse: result.data,
-	          } : undefined,
-	        }
-	      });
-	    }
-	    const availabilityText = result.data.availabilityText ?? availabilityReasonForStatus(
+      console.warn("[api/availability] Provider check failed, returning fallback fare and status", {
+        requestId,
+        trainNo: result.data?.trainNo,
+        reason: result.data?.reason,
+        availabilityStatus: result.data?.availabilityStatus,
+      });
+    }
+    const availabilityText = result.data.availabilityText ?? availabilityReasonForStatus(
 	      result.data.availabilityStatus,
 	      result.data.classType,
 	      result.data.reason
