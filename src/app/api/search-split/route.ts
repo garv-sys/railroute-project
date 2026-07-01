@@ -54,7 +54,7 @@ export async function POST(request: Request) {
       return validationFailure('Booking window is 60 days. Please select an earlier date.', requestId);
     }
 
-    const coverageMode = "quick" as const;
+    const coverageMode = (mode === 'full' ? 'full' : 'quick') as 'quick' | 'full';
     const plannerOptions = {
       debug: Boolean(debug),
       fetchLive: true,
@@ -158,7 +158,8 @@ export async function POST(request: Request) {
     const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 80);
     console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
-    const LIVE_TOP_SPLIT = mode === 'quick' ? 0 : Math.min(diverseRoutes.length, 60);
+    // Always enrich at least the top 15 splits with live data so fares and availability show
+    const LIVE_TOP_SPLIT = Math.min(diverseRoutes.length, 15);
     if (LIVE_TOP_SPLIT > 0) {
       const enrichDeadlineMs = 20000;
       const perRouteTimeoutMs = 15000;
