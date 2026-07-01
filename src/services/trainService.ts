@@ -1340,7 +1340,9 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
   };
 
   let finalCandidates = filteredCandidates;
-  if (isPatnaOrDduStn(normalizedSource) && isJaipurStn(normalizedDest)) {
+  const isForward = isPatnaOrDduStn(normalizedSource) && isJaipurStn(normalizedDest);
+  const isReverse = isPatnaOrDduStn(normalizedDest) && isJaipurStn(normalizedSource);
+  if (isForward || isReverse) {
     const allowed = new Set([
       'DDU', 'MGS',
       'GAYA',
