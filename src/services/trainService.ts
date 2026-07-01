@@ -347,7 +347,7 @@ function trainRunsOnRailDate(runningDays: unknown, date: string): boolean {
   const text = String(runningDays || '');
   if (!/^[01]{7}$/.test(text)) return true;
   const days = text.split('').map((item) => item === '1');
-  const d = new Date(date);
+  const d = dateFromRailDate(date);
   if (isNaN(d.getTime())) return true;
   const jsDay = d.getDay();
   const idx = jsDay === 0 ? 6 : jsDay - 1;
@@ -1325,7 +1325,38 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
 
   filteredCandidates.sort((a, b) => getHubScore(a) - getHubScore(b));
 
-  return takeForCoverage(filteredCandidates, limit);
+  const isPatnaOrDduStn = (stn: string) => {
+    const s = normalizeStationCode(stn);
+    if (s === 'PNBE' || s === 'DDU' || s === 'MGS' || s === 'DURE') return true;
+    const cluster = sameAreaTerminalClusterFor(s, 60);
+    return cluster.includes('PNBE') || cluster.includes('DDU');
+  };
+
+  const isJaipurStn = (stn: string) => {
+    const s = normalizeStationCode(stn);
+    if (s === 'JP') return true;
+    const cluster = sameAreaTerminalClusterFor(s, 60);
+    return cluster.includes('JP');
+  };
+
+  let finalCandidates = filteredCandidates;
+  if (isPatnaOrDduStn(normalizedSource) && isJaipurStn(normalizedDest)) {
+    const allowed = new Set([
+      'DDU', 'MGS',
+      'GAYA',
+      'LKO', 'LJN',
+      'CNB',
+      'PRYJ', 'ALD', 'PRRB', 'PCOI', 'SFG',
+      'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE', 'DEC', 'GGN',
+      'SWM',
+      'BSB', 'BSBS', 'BCY',
+    ]);
+    finalCandidates = filteredCandidates.filter((hubCode) =>
+      allowed.has(normalizeStationCode(hubCode))
+    );
+  }
+
+  return takeForCoverage(finalCandidates, limit);
 }
 
 function isKnownMajorHub(code: string) {
@@ -1453,28 +1484,26 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
     const finalFare = fare > 0 ? fare : getFallbackMockFare(trainNo, source, destination, classCode);
     const runs = !notRunning;
     
-    const statuses = ['AVAILABLE-35', 'AVAILABLE-12', 'RAC-5', 'WL-12', 'AVAILABLE-78', 'WL-3'];
-    const seed = date.getDate() + date.getMonth() + date.getFullYear() + (classCode.charCodeAt(0) || 0) + parseInt(trainNo || '0');
-    const statusText = runs ? statuses[seed % statuses.length] : 'Not Running';
-    const statusValue = runs ? (statusText.startsWith('AVAILABLE') ? 'AVAILABLE' : statusText.startsWith('RAC') ? 'RAC' : 'WL') : 'NOT_RUNNING';
-    const seatsValue = runs && statusValue === 'AVAILABLE' ? parseInt(statusText.split('-')[1] || '12') : 0;
-    const chance = runs ? (statusValue === 'AVAILABLE' ? 100 : statusValue === 'RAC' ? 92 : 75) : 0;
+    const statusText = runs ? 'Check seats' : 'Not Running';
+    const statusValue = runs ? 'UNAVAILABLE' as const : 'NOT_RUNNING' as const;
+    const seatsValue = 0;
+    const chance = runs ? 100 : 0;
 
-    const availabilityStatus: LookupTrustStatus = runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE';
-    const fareStatus: LookupTrustStatus = runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE';
-    const lookupReason = runs ? statusText : 'Not Running';
+    const availabilityStatus: LookupTrustStatus = runs ? (availabilityStatusInput || 'PROVIDER_UNAVAILABLE') : 'PROVIDER_UNAVAILABLE';
+    const fareStatus: LookupTrustStatus = runs ? (fareStatusInput || 'NOT_CHECKED') : 'PROVIDER_UNAVAILABLE';
+    const lookupReason = runs ? (reason || 'Check seats') : 'Not Running';
 
     return {
       dateStr: `${daysOfWeek[date.getDay()]}, ${String(date.getDate()).padStart(2, '0')} ${months[date.getMonth()]}`,
       rawDate: localIsoDate(date),
-      status: statusValue as any,
-      text: lookupReason,
+      status: statusValue,
+      text: statusText,
       seats: seatsValue,
       fare: finalFare,
       notRunning: !runs,
       confirmationChance: chance,
       fareBreakdown: { baseFare: finalFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: finalFare },
-      updatedTime: 'Verified live',
+      updatedTime: runs ? 'Tap to check' : 'Not Running',
       availabilityStatus,
       fareStatus,
       lookupReason,
