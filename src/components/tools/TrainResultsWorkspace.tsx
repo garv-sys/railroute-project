@@ -3000,7 +3000,9 @@ export function SplitJourneyCard({
   }, [mapRoute2, leg2]);
   const scopedClass = String(requestedClass || "").toUpperCase().trim();
   const totalDuration = splitTotalDuration(split);
-  const hubCode = split.hubStation || actualLegDestinationStation(leg1) || actualLegSourceStation(leg2) || "";
+  const actualArrival = actualLegDestinationStation(leg1) || leg1.destination || "";
+  const actualDeparture = actualLegSourceStation(leg2) || leg2.source || "";
+  const hubCode = actualArrival === actualDeparture && actualArrival ? actualArrival : split.hubStation || actualArrival || actualDeparture || "";
   const trustMeta = trustMetaFromTrain(leg1, { splitRoute: true });
   const legTrust = legDataTrustCopy([leg1, leg2], trustMeta);
   const routeTitle = `${stationCompactLabelWithDistance(actualLegSourceStation(leg1) || leg1.source, requestedSourceStation(leg1))} → ${stationCompactLabel(hubCode)} → ${stationCompactLabelWithDistance(actualLegDestinationStation(leg2) || leg2.destination, requestedDestinationStation(leg2))}`;
