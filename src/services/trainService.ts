@@ -1339,26 +1339,7 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     return cluster.includes('JP');
   };
 
-  let finalCandidates = filteredCandidates;
-  const isForward = isPatnaOrDduStn(normalizedSource) && isJaipurStn(normalizedDest);
-  const isReverse = isPatnaOrDduStn(normalizedDest) && isJaipurStn(normalizedSource);
-  if (isForward || isReverse) {
-    const allowed = new Set([
-      'DDU', 'MGS',
-      'GAYA',
-      'LKO', 'LJN',
-      'CNB',
-      'PRYJ', 'ALD', 'PRRB', 'PCOI', 'SFG',
-      'NDLS', 'DLI', 'NZM', 'ANVT', 'DEE', 'DEC', 'GGN',
-      'SWM',
-      'BSB', 'BSBS', 'BCY',
-    ]);
-    finalCandidates = filteredCandidates.filter((hubCode) =>
-      allowed.has(normalizeStationCode(hubCode))
-    );
-  }
-
-  return takeForCoverage(finalCandidates, limit);
+  return takeForCoverage(filteredCandidates, limit);
 }
 
 function isKnownMajorHub(code: string) {
@@ -2857,7 +2838,8 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   console.log(`[TRACER] [findSmartRoutesForDate] 1. Journey Request: source=${source}, destination=${dest}, date=${formattedDate}, timeout=${timeout}ms`);
 
   // Dynamically generate candidate hubs using dynamicSplitHubCandidates (no hardcoded fixed list)
-  const rawHubs = dynamicSplitHubCandidates(source, dest, preferredHubInput, 50);
+  // Use 100 hubs to maximize chance of finding 15 verified routes
+  const rawHubs = dynamicSplitHubCandidates(source, dest, preferredHubInput, 100);
   const hubs = rawHubs.filter(h => h !== source && h !== dest);
   console.log(`[TRACER] [findSmartRoutesForDate] 2. Hub Generation: Total candidates discovered: ${rawHubs.length}. Filtered hubs: ${hubs.join(', ')}`);
 
@@ -2865,7 +2847,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const allRoutes: any[] = [];
   const seen = new Set<string>();
 
-  for (const hub of hubs.slice(0, 60)) {
+  for (const hub of hubs.slice(0, 80)) {
     if (Date.now() - startTime > timeout - 3000) {
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Timeout exceeded during hub search.`);
       break;
@@ -2927,11 +2909,11 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         continue;
       }
 
-      // Per-hub diversity cap: each hub contributes at most 6 candidates to final pool
-      const hubCap = 6;
+      // Per-hub diversity cap: each hub contributes at most 10 candidates to final pool
+      const hubCap = 10;
       let hubContrib = 0;
-      for (const t1 of filteredL1.slice(0, 15)) {
-        for (const t2 of filteredL2.slice(0, 15)) {
+      for (const t1 of filteredL1.slice(0, 20)) {
+        for (const t2 of filteredL2.slice(0, 20)) {
           if (hubContrib >= hubCap) break;
           const tn1 = cleanTrainNo(t1.trainNo || t1.train_no);
           const tn2 = cleanTrainNo(t2.trainNo || t2.train_no);
