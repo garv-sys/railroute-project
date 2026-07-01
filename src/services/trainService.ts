@@ -2900,11 +2900,20 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         }
       }
 
+      // Always filter by running day — IRCTC won't return data for trains that don't run on the date
+      l1 = l1.filter((t: any) => trainRunsOnRailDate(t.running_days || t.runsOn || '1111111', formattedDate));
+      // Leg 2 may depart on next day after overnight Leg 1 arrival; allow same day OR next day trains
+      const nextDayDate = addDaysToRailDate(formattedDate, 1);
+      l2 = l2.filter((t: any) => {
+        const runsSameDay = trainRunsOnRailDate(t.running_days || t.runsOn || '1111111', formattedDate);
+        const runsNextDay = trainRunsOnRailDate(t.running_days || t.runsOn || '1111111', nextDayDate);
+        return runsSameDay || runsNextDay;
+      });
+
       if (l1.length === 0 || l2.length === 0) {
-        console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected hub "${hub}" - no trains on one of the legs.`);
+        console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected hub "${hub}" - no trains running on date after day-of-week filter.`);
         continue;
       }
-      console.log(`[TRACER] [findSmartRoutesForDate] hub=${hub} leg1=${l1.length} leg2=${l2.length}`);
 
       const cleanClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
       let filteredL1 = l1;
