@@ -20,7 +20,7 @@ export type FareRow = {
   availability: string | null;
   status: string;
   seats: number | null;
-  source: "date-specific-provider" | "unavailable";
+  source: "date-specific-provider" | "unavailable" | "estimated";
   fareKind: "date-specific" | "unavailable";
   isDateSpecific: boolean;
   warning?: string;

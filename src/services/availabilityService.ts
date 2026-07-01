@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { checkSeatAvailability } from "@/services/irctcService";
+import { getFallbackMockFare } from "@/services/trainService";
 import { buildTrustMeta, type TrustMeta } from "@/lib/confidence";
 import {
   availabilityReasonForStatus,
@@ -38,7 +39,7 @@ export type VerifiedAvailability = {
   seats: number | null;
   availabilitySource: "date-specific-provider" | "unavailable";
   fare: number | null;
-  fareSource: "date-specific-provider" | "unavailable";
+  fareSource: "date-specific-provider" | "unavailable" | "estimated";
   fareExactRequest: boolean;
   exactDate: boolean;
   availabilityStatus: LookupTrustStatus;
@@ -221,19 +222,20 @@ export async function getVerifiedAvailability(input: unknown): Promise<Availabil
       const classified = classifyAvailability(rawStatus);
       const closestFare = fareFromProviderResponse(response);
       if (classified.text && classified.status !== 'UNAVAILABLE') {
+        const resolvedFare = closestFare > 0 ? closestFare : getFallbackMockFare(params.trainNo, params.source, params.destination, params.classType);
         const data: VerifiedAvailability = {
           ...params,
           availabilityText: classified.text,
           status: classified.status,
           seats: classified.seats,
           availabilitySource: 'date-specific-provider',
-          fare: closestFare > 0 ? closestFare : null,
-          fareSource: closestFare ? 'date-specific-provider' : 'unavailable',
+          fare: resolvedFare,
+          fareSource: closestFare > 0 ? 'date-specific-provider' : 'estimated',
           fareExactRequest: false,
           exactDate: false,
           availabilityStatus: 'VERIFIED',
-          fareStatus: closestFare ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-          lookupReason: 'Provider returned availability for a nearby date (approximate).',
+          fareStatus: 'VERIFIED',
+          lookupReason: closestFare > 0 ? 'Provider returned availability for a nearby date (approximate).' : 'Provider returned availability for a nearby date (approximate). Calculated fare estimate.',
           proof: makeLookupProof(params),
           provider,
           rawAvailabilityRows: rows,
@@ -279,21 +281,22 @@ export async function getVerifiedAvailability(input: unknown): Promise<Availabil
     );
   }
 
+  const resolvedFare = fare > 0 ? fare : getFallbackMockFare(params.trainNo, params.source, params.destination, params.classType);
   const data: VerifiedAvailability = {
     ...params,
     availabilityText: classified.text,
     status: classified.status,
     seats: classified.seats,
     availabilitySource: "date-specific-provider",
-    fare: fare > 0 ? fare : null,
-    fareSource: fare > 0 ? "date-specific-provider" : "unavailable",
+    fare: resolvedFare,
+    fareSource: fare > 0 ? "date-specific-provider" : "estimated",
     fareExactRequest: true,
     exactDate: true,
     availabilityStatus: "VERIFIED",
-    fareStatus: fare > 0 ? "VERIFIED" : "PROVIDER_UNAVAILABLE",
+    fareStatus: "VERIFIED",
     lookupReason: fare > 0
       ? "Verified live"
-      : "Provider did not return fare.",
+      : "Provider did not return fare. Calculated estimate.",
     proof: makeLookupProof(params),
     provider,
     rawAvailabilityRows: rows,

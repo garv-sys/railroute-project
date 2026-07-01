@@ -3230,7 +3230,7 @@ export function SplitJourneyCard({
                 #{rank}
               </span>
             )}
-            <DataBadge type="SPLIT ROUTE" label="Split journey" />
+            <DataBadge type="SPLIT ROUTE" label="1-Split (1 Transfer)" />
             <DataBadge type={legTrust.badgeType} label={legTrust.badgeLabel} />
           </div>
             <h3 className="mt-3 text-xl font-black leading-tight">
@@ -3389,7 +3389,7 @@ export function MultiSplitJourneyCard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex flex-wrap gap-2">
-            <DataBadge type="SPLIT ROUTE" label="Multi-split journey" />
+            <DataBadge type="SPLIT ROUTE" label={`${legs.length - 1}-Split (${legs.length - 1} Transfers)`} />
             <DataBadge type={legTrust.badgeType} label={legTrust.badgeLabel} />
           </div>
           <p className="mt-3 text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">{legTrust.text}</p>
