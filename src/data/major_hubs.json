@@ -190,5 +190,6 @@
   { "code": "VSG", "name": "Vasco da Gama", "lat": 15.398, "lon": 73.811, "zone": "SWR", "state": "Goa" },
   { "code": "LD", "name": "Londa", "lat": 15.37, "lon": 74.52, "zone": "SWR", "state": "Karnataka" },
   { "code": "RN", "name": "Ratnagiri", "lat": 17, "lon": 73.3, "zone": "KRCL", "state": "Maharashtra" },
-  { "code": "ROHA", "name": "Roha", "lat": 18.44, "lon": 73.12, "zone": "CR", "state": "Maharashtra" }
+  { "code": "ROHA", "name": "Roha", "lat": 18.44, "lon": 73.12, "zone": "CR", "state": "Maharashtra" },
+  { "code": "TDL", "name": "Tundla Jn", "lat": 27.2039, "lon": 78.2435, "zone": "NCR", "state": "Uttar Pradesh" }
 ]
