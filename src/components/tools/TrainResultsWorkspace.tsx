@@ -1318,7 +1318,7 @@ export function TrainResultsWorkspace() {
           {/* Emergency travel panel removed per request */}
 	      <div className="mt-6 space-y-4">
         {(resultMode === "all" || resultMode === "direct") && (() => {
-          const validDirectTrains = visibleTrains.filter(t => hasVerifiedFareAndSeat(t, selectedSortClass || ""));
+          const validDirectTrains = visibleTrains;
           return (
           <>
             <ResultSectionHeader title="Direct Trains" detail="Single-train journeys returned by the provider for the selected station pair/date." />
