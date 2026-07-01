@@ -1612,24 +1612,17 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
         const jsDay = dj.getDay();
         const idx = jsDay === 0 ? 6 : jsDay - 1;
         const runs = runningDays ? runningDays[idx] : true;
-        const mockDay = getMockStatusForDay(dj, j, runs);
         
-        list.push({
-          dateStr: `${daysOfWeek[dj.getDay()]}, ${String(dj.getDate()).padStart(2, '0')} ${months[dj.getMonth()]}`,
-          rawDate: localIsoDate(dj),
-          status: mockDay.status,
-          text: mockDay.text,
-          seats: mockDay.seats,
-          fare: runs ? mockFare : 0,
-          notRunning: !runs,
-          confirmationChance: mockDay.confirmationChance,
-          fareBreakdown: { baseFare: mockFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: mockFare },
-          updatedTime: `Estimated fallback (${errorMsg})`,
-          availabilityStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-          fareStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-          lookupReason: runs ? mockDay.text : 'Not Running',
-          proof: proofFor(dj),
-        });
+        list.push(unavailableRow(
+          dj,
+          runs ? `Live search failed: ${errorMsg}` : 'Not Running',
+          runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
+          !runs,
+          runs ? mockFare : 0,
+          undefined,
+          runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
+          runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+        ));
       }
       return list;
     }
@@ -1662,38 +1655,16 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
         if (liveItem) {
           const rawStatus = String(liveItem.availabilityText || liveItem.status || liveItem.Availability || '').toUpperCase().trim();
           if (!rawStatus || /availability unavailable/i.test(rawStatus)) {
-            if (!isDemoMode) {
-              list.push(unavailableRow(
-                dj,
-                runs ? 'Availability unavailable from provider' : 'Not Running',
-                runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
-                !runs,
-                getFallbackMockFare(trainNo, source, destination, classCode),
-                undefined,
-                runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
-                runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
-              ));
-              continue;
-            }
-            const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
-            const mockDay = getMockStatusForDay(dj, j, runs);
-
-            list.push({
-              dateStr: cleanDateStrJ,
-              rawDate: rawDateJ,
-              status: mockDay.status,
-              text: mockDay.text,
-              seats: mockDay.seats,
-              fare: runs ? mockFare : 0,
-              notRunning: !runs,
-              confirmationChance: mockDay.confirmationChance,
-              fareBreakdown: { baseFare: mockFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: mockFare },
-              updatedTime: 'Estimated fallback (live check returned unavailable)',
-              availabilityStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-              fareStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-              lookupReason: runs ? mockDay.text : 'Not Running',
-              proof: proofFor(dj),
-            });
+            list.push(unavailableRow(
+              dj,
+              runs ? 'Availability unavailable from provider' : 'Not Running',
+              runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
+              !runs,
+              getFallbackMockFare(trainNo, source, destination, classCode),
+              undefined,
+              runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
+              runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+            ));
             continue;
           }
           const cleanStatus = rawStatus.replace(/\s+/g, '');
@@ -1772,94 +1743,20 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
             };
           }
         } else {
-          if (!isDemoMode) {
-            list.push(unavailableRow(
-              dj,
-              runs ? 'Tap to check seats' : 'Not Running',
-              runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
-              !runs,
-              getFallbackMockFare(trainNo, source, destination, classCode),
-              undefined,
-              runs ? 'NOT_CHECKED' : 'PROVIDER_UNAVAILABLE',
-              runs ? 'NOT_CHECKED' : 'PROVIDER_UNAVAILABLE'
-            ));
-            continue;
-          }
-          const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
-          const mockDay = getMockStatusForDay(dj, j, runs);
-
-          list.push({
-            dateStr: cleanDateStrJ,
-            rawDate: rawDateJ,
-            status: mockDay.status,
-            text: mockDay.text,
-            seats: mockDay.seats,
-            fare: runs ? mockFare : 0,
-            notRunning: !runs,
-            confirmationChance: mockDay.confirmationChance,
-            fareBreakdown: { baseFare: mockFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: mockFare },
-            updatedTime: 'Estimated fallback (not in provider response)',
-            availabilityStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-            fareStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-            lookupReason: runs ? mockDay.text : 'Not Running',
-            proof: proofFor(dj),
-          });
-        }
-      }
-      return list;
-    } else {
-      if (!isDemoMode) {
-        for (let j = 0; j < 60; j++) {
-          const dj = new Date(baseDate.getTime());
-          dj.setDate(dj.getDate() + j);
-          const jsDay = dj.getDay();
-          const idx = jsDay === 0 ? 6 : jsDay - 1;
-          const runs = runningDays ? runningDays[idx] : true;
           list.push(unavailableRow(
             dj,
-            runs ? 'Invalid response format from provider' : 'Not Running',
+            runs ? 'Tap to check seats' : 'Not Running',
             runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
             !runs,
             getFallbackMockFare(trainNo, source, destination, classCode),
             undefined,
-            runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
-            runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+            runs ? 'NOT_CHECKED' : 'PROVIDER_UNAVAILABLE',
+            runs ? 'NOT_CHECKED' : 'PROVIDER_UNAVAILABLE'
           ));
         }
-        return list;
-      }
-      const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
-      for (let j = 0; j < 60; j++) {
-        const dj = new Date(baseDate.getTime());
-        dj.setDate(dj.getDate() + j);
-        const jsDay = dj.getDay();
-        const idx = jsDay === 0 ? 6 : jsDay - 1;
-        const runs = runningDays ? runningDays[idx] : true;
-        const mockDay = getMockStatusForDay(dj, j, runs);
-        
-        list.push({
-          dateStr: `${daysOfWeek[dj.getDay()]}, ${String(dj.getDate()).padStart(2, '0')} ${months[dj.getMonth()]}`,
-          rawDate: localIsoDate(dj),
-          status: mockDay.status,
-          text: mockDay.text,
-          seats: mockDay.seats,
-          fare: runs ? mockFare : 0,
-          notRunning: !runs,
-          confirmationChance: mockDay.confirmationChance,
-          fareBreakdown: { baseFare: mockFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: mockFare },
-          updatedTime: 'Estimated fallback (invalid provider response format)',
-          availabilityStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-          fareStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-          lookupReason: runs ? mockDay.text : 'Not Running',
-          proof: proofFor(dj),
-        });
       }
       return list;
-    }
-  } catch (error: any) {
-    console.warn(`[IRCTC] Availability check failed for ${trainNo}`, error?.message || error);
-    const isDemoMode = !process.env.IRCTC_API_KEY;
-    if (!isDemoMode) {
+    } else {
       for (let j = 0; j < 60; j++) {
         const dj = new Date(baseDate.getTime());
         dj.setDate(dj.getDate() + j);
@@ -1868,7 +1765,7 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
         const runs = runningDays ? runningDays[idx] : true;
         list.push(unavailableRow(
           dj,
-          runs ? `API check failed: ${error?.message || error}` : 'Not Running',
+          runs ? 'Invalid response format from provider' : 'Not Running',
           runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
           !runs,
           getFallbackMockFare(trainNo, source, destination, classCode),
@@ -1879,31 +1776,24 @@ export function getFallbackMockFare(tNo: string, src: string, dst: string, cls: 
       }
       return list;
     }
-    const mockFare = getFallbackMockFare(trainNo, source, destination, classCode);
+  } catch (error: any) {
+    console.warn(`[IRCTC] Availability check failed for ${trainNo}`, error?.message || error);
     for (let j = 0; j < 60; j++) {
       const dj = new Date(baseDate.getTime());
       dj.setDate(dj.getDate() + j);
       const jsDay = dj.getDay();
       const idx = jsDay === 0 ? 6 : jsDay - 1;
       const runs = runningDays ? runningDays[idx] : true;
-      const mockDay = getMockStatusForDay(dj, j, runs);
-      
-      list.push({
-        dateStr: `${daysOfWeek[dj.getDay()]}, ${String(dj.getDate()).padStart(2, '0')} ${months[dj.getMonth()]}`,
-        rawDate: localIsoDate(dj),
-        status: mockDay.status,
-        text: mockDay.text,
-        seats: mockDay.seats,
-        fare: runs ? mockFare : 0,
-        notRunning: !runs,
-        confirmationChance: mockDay.confirmationChance,
-        fareBreakdown: { baseFare: mockFare, reservationCharge: 0, superfastCharge: 0, gst: 0, total: mockFare },
-        updatedTime: `Estimated fallback (check failed: ${error?.message || error})`,
-        availabilityStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-        fareStatus: runs ? 'VERIFIED' : 'PROVIDER_UNAVAILABLE',
-        lookupReason: runs ? mockDay.text : 'Not Running',
-        proof: proofFor(dj),
-      });
+      list.push(unavailableRow(
+        dj,
+        runs ? `API check failed: ${error?.message || error}` : 'Not Running',
+        runs ? 'UNAVAILABLE' : 'NOT_RUNNING',
+        !runs,
+        getFallbackMockFare(trainNo, source, destination, classCode),
+        undefined,
+        runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',
+        runs ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE'
+      ));
     }
     return list;
   }
