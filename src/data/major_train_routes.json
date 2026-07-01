@@ -11466,5 +11466,95 @@
         "day": 2
       }
     ]
+  },
+  {
+    "trainNo": "12315",
+    "trainName": "ANANYA EXPRESS",
+    "runsOnDays": "0001000",
+    "classes": ["1A", "2A", "3A", "SL", "3E", "2S"],
+    "route": [
+      { "code": "KOAA", "arrival": "13:10", "departure": "13:10", "distance": 0, "day": 1 },
+      { "code": "PNBE", "arrival": "21:30", "departure": "21:40", "distance": 538, "day": 1 },
+      { "code": "DDU", "arrival": "01:00", "departure": "01:10", "distance": 749, "day": 2 },
+      { "code": "PRYJ", "arrival": "04:00", "departure": "04:05", "distance": 900, "day": 2 },
+      { "code": "CNB", "arrival": "06:10", "departure": "06:15", "distance": 1094, "day": 2 },
+      { "code": "JP", "arrival": "16:00", "departure": "16:10", "distance": 1450, "day": 2 },
+      { "code": "UDZ", "arrival": "02:45", "departure": "02:45", "distance": 1880, "day": 3 }
+    ]
+  },
+  {
+    "trainNo": "12316",
+    "trainName": "ANANYA EXPRESS",
+    "runsOnDays": "1000000",
+    "classes": ["1A", "2A", "3A", "SL", "3E", "2S"],
+    "route": [
+      { "code": "UDZ", "arrival": "00:45", "departure": "00:45", "distance": 0, "day": 1 },
+      { "code": "JP", "arrival": "09:00", "departure": "09:10", "distance": 430, "day": 1 },
+      { "code": "CNB", "arrival": "19:35", "departure": "19:40", "distance": 786, "day": 1 },
+      { "code": "PRYJ", "arrival": "22:05", "departure": "22:10", "distance": 980, "day": 1 },
+      { "code": "DDU", "arrival": "02:30", "departure": "02:40", "distance": 1131, "day": 2 },
+      { "code": "PNBE", "arrival": "05:40", "departure": "05:50", "distance": 1342, "day": 2 },
+      { "code": "KOAA", "arrival": "14:45", "departure": "14:45", "distance": 1880, "day": 2 }
+    ]
+  },
+  {
+    "trainNo": "12395",
+    "trainName": "ZIYARAT EXPRESS",
+    "runsOnDays": "0010000",
+    "classes": ["1A", "2A", "3A", "SL", "3E", "2S"],
+    "route": [
+      { "code": "RJPB", "arrival": "17:55", "departure": "17:55", "distance": 0, "day": 1 },
+      { "code": "PNBE", "arrival": "18:10", "departure": "18:20", "distance": 3, "day": 1 },
+      { "code": "DDU", "arrival": "22:50", "departure": "23:00", "distance": 214, "day": 1 },
+      { "code": "PRYJ", "arrival": "01:05", "departure": "01:10", "distance": 364, "day": 2 },
+      { "code": "CNB", "arrival": "03:25", "departure": "03:30", "distance": 559, "day": 2 },
+      { "code": "JP", "arrival": "13:05", "departure": "13:15", "distance": 915, "day": 2 },
+      { "code": "AII", "arrival": "15:25", "departure": "15:25", "distance": 1050, "day": 2 }
+    ]
+  },
+  {
+    "trainNo": "12396",
+    "trainName": "ZIYARAT EXPRESS",
+    "runsOnDays": "0000100",
+    "classes": ["1A", "2A", "3A", "SL", "3E", "2S"],
+    "route": [
+      { "code": "AII", "arrival": "00:45", "departure": "00:45", "distance": 0, "day": 1 },
+      { "code": "JP", "arrival": "02:25", "departure": "02:35", "distance": 135, "day": 1 },
+      { "code": "CNB", "arrival": "13:55", "departure": "14:00", "distance": 491, "day": 1 },
+      { "code": "PRYJ", "arrival": "16:40", "departure": "16:45", "distance": 686, "day": 1 },
+      { "code": "DDU", "arrival": "19:30", "departure": "19:40", "distance": 836, "day": 1 },
+      { "code": "PNBE", "arrival": "22:25", "departure": "22:35", "distance": 1047, "day": 1 },
+      { "code": "RJPB", "arrival": "23:10", "departure": "23:10", "distance": 1050, "day": 1 }
+    ]
+  },
+  {
+    "trainNo": "15631",
+    "trainName": "GHY BKN EXPRESS",
+    "runsOnDays": "0001000",
+    "classes": ["2A", "3A", "SL", "3E", "2S"],
+    "route": [
+      { "code": "GHY", "arrival": "13:25", "departure": "13:25", "distance": 0, "day": 1 },
+      { "code": "PNBE", "arrival": "07:30", "departure": "07:40", "distance": 890, "day": 2 },
+      { "code": "DDU", "arrival": "11:50", "departure": "12:00", "distance": 1100, "day": 2 },
+      { "code": "PRYJ", "arrival": "14:20", "departure": "14:25", "distance": 1250, "day": 2 },
+      { "code": "CNB", "arrival": "17:05", "departure": "17:10", "distance": 1445, "day": 2 },
+      { "code": "JP", "arrival": "02:20", "departure": "02:30", "distance": 1800, "day": 3 },
+      { "code": "BKN", "arrival": "12:00", "departure": "12:00", "distance": 2180, "day": 3 }
+    ]
+  },
+  {
+    "trainNo": "15632",
+    "trainName": "BKN GHY EXPRESS",
+    "runsOnDays": "0000001",
+    "classes": ["2A", "3A", "SL", "3E", "2S"],
+    "route": [
+      { "code": "BKN", "arrival": "21:15", "departure": "21:15", "distance": 0, "day": 1 },
+      { "code": "JP", "arrival": "05:45", "departure": "05:55", "distance": 380, "day": 2 },
+      { "code": "CNB", "arrival": "14:05", "departure": "14:10", "distance": 735, "day": 2 },
+      { "code": "PRYJ", "arrival": "16:40", "departure": "16:45", "distance": 930, "day": 2 },
+      { "code": "DDU", "arrival": "20:00", "departure": "20:10", "distance": 1080, "day": 2 },
+      { "code": "PNBE", "arrival": "23:15", "departure": "23:25", "distance": 1290, "day": 2 },
+      { "code": "GHY", "arrival": "18:30", "departure": "18:30", "distance": 2180, "day": 3 }
+    ]
   }
 ]

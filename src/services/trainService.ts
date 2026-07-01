@@ -2955,6 +2955,26 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
     if (enriched >= 80) break;
     const routeString = `${route.t1.trainNo || route.t1.train_no} -> ${route.hub} -> ${route.t2.trainNo || route.t2.train_no}`;
     try {
+      // 1. Validate Leg 1 runs on the request date
+      if (!trainRunsOnRailDate(route.t1.running_days || route.t1.runsOn || '1111111', formattedDate)) {
+        console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - Leg 1 does not run on ${formattedDate}`);
+        continue;
+      }
+
+      // 2. Validate Leg 2 runs on the calculated Leg 2 departure date
+      const l1ArrRaw = route.t1.arrivalTime || route.t1.to_time || '';
+      const l2DepRaw = route.t2.departureTime || route.t2.from_time || '';
+      if (l1ArrRaw && l2DepRaw) {
+        const arrivalMsRaw = parseTime(l1ArrRaw, formattedDate).getTime();
+        let depMsRaw = parseTime(l2DepRaw, formattedDate).getTime();
+        while (depMsRaw < arrivalMsRaw) depMsRaw += 86400000;
+        const leg2DateStr = formatRailDate(new Date(depMsRaw));
+        if (!trainRunsOnRailDate(route.t2.running_days || route.t2.runsOn || '1111111', leg2DateStr)) {
+          console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - Leg 2 does not run on ${leg2DateStr}`);
+          continue;
+        }
+      }
+
       const liveOpts: TrainSearchOptions = { ...options, fetchLive: options.fetchLive !== false, fetchAllClasses: false, debug: false };
       const [e1, e2] = await Promise.all([
         enrichWithLiveAvailability({ ...route.t1 }, formattedDate, classType, liveOpts, quota),

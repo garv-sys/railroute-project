@@ -156,6 +156,9 @@ export function RunningDaysStrip({ train, journeyDate, compact = false }: { trai
           Not this day
         </span>
       )}
+      <span className="ml-2 text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase">
+        {days.filter(Boolean).length === 7 ? "• Daily" : `• Runs ${days.filter(Boolean).length} day${days.filter(Boolean).length === 1 ? "" : "s"}/week`}
+      </span>
     </div>
   );
 }
