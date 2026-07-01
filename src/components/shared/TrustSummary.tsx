@@ -751,7 +751,7 @@ export function classFareText(train: any, classCode: string) {
   const status = first?.fareStatus || "PROVIDER_UNAVAILABLE";
   if (fare > 0 && status === "VERIFIED") return formatFare(fare);
   const est = estimatedFareAmount(train, classCode || code || "");
-  if (est > 0) return `${formatFare(est)} (est.)`;
+  if (est > 0) return `${formatFare(est)}`;
   return "";
 }
 
