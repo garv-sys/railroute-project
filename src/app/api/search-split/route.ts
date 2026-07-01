@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     const coverageMode = (mode === 'full' ? 'full' : 'quick') as 'quick' | 'full';
     const plannerOptions = {
       debug: Boolean(debug),
-      fetchLive: true,
+      fetchLive: false,
       liveLookupLimit: 0,
       coverageMode,
       exactStationOnly: false,
@@ -158,8 +158,7 @@ export async function POST(request: Request) {
     const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 80);
     console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
-    // Always enrich at least the top 15 splits with live data so fares and availability show
-    const LIVE_TOP_SPLIT = Math.min(diverseRoutes.length, 15);
+    const LIVE_TOP_SPLIT = mode === 'quick' ? 0 : Math.min(diverseRoutes.length, 15);
     if (LIVE_TOP_SPLIT > 0) {
       const enrichDeadlineMs = 45000;
       const perRouteTimeoutMs = 20000;
