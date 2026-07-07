@@ -366,44 +366,63 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
       )
     );
 
-    let response: any = await callWithRetry(doFetch, 1, 'availability');
-    let rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
-    let fareObj = response?.data?.fare;
+    try {
+      console.log(`[IRCTC] [RAW-CALL] Fetching seat availability for Train ${trainNo} (${fromStn}->${toStn}) on ${dateStr} [Class: ${normalizedClass}, Quota: ${quota}]`);
+      let response: any = await callWithRetry(doFetch, 1, 'availability');
+      console.log(`[IRCTC] [RAW-RESPONSE] Provider response for Train ${trainNo} (${fromStn}->${toStn}):`, JSON.stringify(response));
 
-    const hasNoFare = !fareObj || fareObj.totalFare === 0 || fareObj.Fare === 0 || fareObj.Amount === 0 || fareObj.total === 0;
+      let rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
+      let fareObj = response?.data?.fare;
 
-    if (rows.length === 0 || hasNoFare) {
-      console.log('[fare-retry]', trainNo, fromStn, toStn, dateStr, normalizedClass);
-      await new Promise((r) => setTimeout(r, 2000));
-      const retryResponse = await callWithRetry(doFetch, 1, 'availability');
-      const retryRows = Array.isArray(retryResponse?.data?.availability) ? retryResponse.data.availability : [];
-      const retryFareObj = retryResponse?.data?.fare;
-      // Only overwrite if the retry actually succeeded in getting rows
-      if (retryRows.length > 0) {
-        response = retryResponse;
-        rows = retryRows;
-        fareObj = retryFareObj;
+      const hasNoFare = !fareObj || fareObj.totalFare === 0 || fareObj.Fare === 0 || fareObj.Amount === 0 || fareObj.total === 0;
+
+      if (rows.length === 0 || hasNoFare) {
+        console.log(`[IRCTC] Empty availability or missing fare. Retrying once for Train ${trainNo} after 2000ms...`);
+        await new Promise((r) => setTimeout(r, 2000));
+        const retryResponse = await callWithRetry(doFetch, 1, 'availability');
+        console.log(`[IRCTC] [RAW-RETRY-RESPONSE] Retry response for Train ${trainNo}:`, JSON.stringify(retryResponse));
+        
+        const retryRows = Array.isArray(retryResponse?.data?.availability) ? retryResponse.data.availability : [];
+        const retryFareObj = retryResponse?.data?.fare;
+        if (retryRows.length > 0) {
+          response = retryResponse;
+          rows = retryRows;
+          fareObj = retryFareObj;
+        }
       }
-    }
 
-    if (rows.length === 0) {
-      console.warn('[live-check-debug] Still empty after retry', { trainNo, fromStn, toStn, date: dateStr, classType: normalizedClass, rowCount: rows.length, fare: fareObj });
+      if (rows.length === 0) {
+        const errorMsg = response?.error || response?.data?.error || response?.message || "Empty availability returned";
+        console.warn(`[IRCTC-LEG-FAIL] Seat availability lookup returned empty/error for Train ${trainNo} (${fromStn}->${toStn}) on ${dateStr} [Class: ${normalizedClass}, Quota: ${quota}]. Provider error: ${errorMsg}`);
+        return {
+          success: false,
+          error: errorMsg,
+          provider: response?.provider || 'irctc-connect',
+          data: {
+            availability: [],
+            fare: null,
+            lookupReason: errorMsg
+          }
+        };
+      }
+
+      return {
+        ...(response && typeof response === 'object' && !Array.isArray(response) ? response : {}),
+        provider: response?.provider || 'irctc-connect',
+      };
+    } catch (err: any) {
+      console.error(`[IRCTC-LEG-ERROR] Exception thrown during seat availability lookup for Train ${trainNo} (${fromStn}->${toStn}) on ${dateStr} [Class: ${normalizedClass}, Quota: ${quota}]:`, err);
       return {
         success: false,
-        error: "Provider returned no data",
-        provider: response?.provider || 'irctc-connect',
+        error: err?.message || String(err),
+        provider: 'irctc-connect',
         data: {
           availability: [],
           fare: null,
-          lookupReason: "Provider returned no data"
+          lookupReason: err?.message || String(err)
         }
       };
     }
-
-    return {
-      ...(response && typeof response === 'object' && !Array.isArray(response) ? response : {}),
-      provider: response?.provider || 'irctc-connect',
-    };
   }, dynamicTtl);
 }
 

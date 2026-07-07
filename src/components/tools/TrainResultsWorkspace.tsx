@@ -90,7 +90,7 @@ import {
 } from "../shared/utils";
 import { LoadingBlock } from "../shared/LoadingBlock";
 import { TrustSummary, QuotaTimingNotice, RunningDaysStrip, primaryClassCode, resolveClassCode, classAvailabilityStatus, compactSeatText, classAvailabilityText, returnedClassesForTrain, liveFareText, compactFareText, fareTone, availabilityTone, readableRailStatus, fareToNumber, durationToMinutes, splitTotalDuration, splitLayoverMinutes, classFareAmount, trainFareAmount, timeToMinutes, multiSplitLayoverMinutes, actualLegSourceStation, actualLegDestinationStation, trainNumberName, isSeatAvailable, splitHasVerifiedFareAndSeats, formatFare, formatDurationLong, multiSplitHasVerifiedFareAndSeats, classFareText, classDataSourceLabel, debugModeEnabled, providerMarkedSelectedClassUnavailable, hasVerifiedFareAndSeat, dedupeSplitRoutes, isLongJourneyStationPair, splitRouteStableKey, splitAutoLiveRouteCountForJourney, liveSourceStation, liveDestinationStation, trainJourneyDate, needsLiveQuotaRefresh, type LiveClassQuote, applyLiveQuoteToTrain, liveQuoteFromResponse, isProviderDelay, providerDelayCopy, providerIssueCopy, lookupStatusLabel, fullStationLabelFromCode, SearchResultSummary, ResultSectionHeader, displayClassesForTrain, classCalendarFor, legUsesAlternateTerminal, nearbyTerminalDistanceSummary, requestedSourceStation, requestedDestinationStation, isUnavailableRailStatus, normalizedClassList, liveDataUnavailableWarning, ticketDecision, compactDebugJson, ExpectedPlatformPair, confirmationChanceLabel, confirmationChanceTone, PlatformPairSummary, platformDisplay, FareBreakdownPanel, availabilityCardTone, legDataTrustCopy, estimatedFareAmount, selectedClassCanBeChecked, providerBookingBlockedText, stationCompactLabelWithDistance } from "../shared/TrustSummary";
-import { StationAutocomplete, RelatedStationChips, QuickSearch, resolveStationInput, splitBestRankScore, splitAvailabilityScore, multiSplitBestRankScore, DateQuickField, NearbyDateSuggestions, splitEmergencyRankScore, multiEmergencyRankScore } from "../shared/StationAutocomplete";
+import { StationAutocomplete, RelatedStationChips, QuickSearch, resolveStationInput, splitBestRankScore, splitAvailabilityScore, multiSplitBestRankScore, DateQuickField, NearbyDateSuggestions, splitEmergencyRankScore, multiEmergencyRankScore, optionAvailabilitySummary } from "../shared/StationAutocomplete";
 import { ProductShell } from "../layout/ProductShell";
 import { ToolHeader } from "../layout/ToolHeader";
 import { CoachExplorer } from "./CoachExplorer";
@@ -116,7 +116,7 @@ export function TrainResultsWorkspace() {
   const [quota, setQuota] = useState("GN");
   const allowSplit = true;
   const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi">("all");
-  const [sortBy, setSortBy] = useState<"best" | "cheapest" | "highestFare" | "fastest" | "lowestLayover" | "earliest" | "latest">("best");
+  const [sortBy, setSortBy] = useState<"best" | "cheapest" | "highestFare" | "fastest" | "lowestLayover" | "earliest" | "latest" | "availability">("best");
   const [maxFare, setMaxFare] = useState("");
   const [maxDuration, setMaxDuration] = useState("");
   const [confirmedOnly, setConfirmedOnly] = useState(false);
@@ -206,6 +206,13 @@ export function TrainResultsWorkspace() {
       if (sortBy === "lowestLayover") return durationA - durationB;
       if (sortBy === "earliest") return timeToMinutes(a.departureTime) - timeToMinutes(b.departureTime);
       if (sortBy === "latest") return timeToMinutes(b.departureTime) - timeToMinutes(a.departureTime);
+      if (sortBy === "availability") {
+        const availabilityScore = (train: any) => {
+          const availability = selectedSortClass ? classAvailabilityText(train, selectedSortClass) : train.availability;
+          return isSeatAvailable(availability) ? 0 : /RAC/i.test(readableRailStatus(availability)) ? 1 : 2;
+        };
+        return availabilityScore(a) - availabilityScore(b) || durationA - durationB || (fareA || Infinity) - (fareB || Infinity);
+      }
       const availabilityScore = (train: any) => {
         const availability = selectedSortClass ? classAvailabilityText(train, selectedSortClass) : train.availability;
         return isSeatAvailable(availability) ? 0 : /RAC/i.test(readableRailStatus(availability)) ? 1 : 2;
@@ -292,6 +299,11 @@ export function TrainResultsWorkspace() {
           (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity) ||
           (fareA || Infinity) - (fareB || Infinity);
       }
+      if (sortBy === "availability") {
+        const scoreA = splitAvailabilityScore(a, selectedSortClass);
+        const scoreB = splitAvailabilityScore(b, selectedSortClass);
+        return scoreA - scoreB || (durationToMinutes(splitTotalDuration(a)) || Infinity) - (durationToMinutes(splitTotalDuration(b)) || Infinity) || (fareA || Infinity) - (fareB || Infinity);
+      }
       return splitEmergencyRankScore(b, selectedSortClass) - splitEmergencyRankScore(a, selectedSortClass) ||
         splitAvailabilityScore(a, selectedSortClass) - splitAvailabilityScore(b, selectedSortClass) ||
         (fareA || Infinity) - (fareB || Infinity) ||
@@ -376,6 +388,22 @@ export function TrainResultsWorkspace() {
         return multiSplitLayoverMinutes(a) - multiSplitLayoverMinutes(b) ||
           (durationToMinutes(a.totalDuration) || Infinity) - (durationToMinutes(b.totalDuration) || Infinity) ||
           (fareA || Infinity) - (fareB || Infinity);
+      }
+      if (sortBy === "availability") {
+        const getScore = (m: any) => {
+          const l1 = optionAvailabilitySummary(m.leg1, selectedSortClass);
+          const l2 = optionAvailabilitySummary(m.leg2, selectedSortClass);
+          const l3 = optionAvailabilitySummary(m.leg3, selectedSortClass);
+          const statuses = [l1, l2, l3];
+          return statuses.reduce((score, status) => {
+            const text = readableRailStatus(status).toUpperCase();
+            if (/\bAVAILABLE\b|\bAVL\b|CNF|CONFIRM/.test(text) && !/WL|WAIT|REGRET/.test(text)) return score + 0;
+            if (/RAC/.test(text)) return score + 1;
+            if (/WL|WAIT/.test(text)) return score + 2;
+            return score + 5;
+          }, 0);
+        };
+        return getScore(a) - getScore(b) || (durationToMinutes(a.totalDuration) || Infinity) - (durationToMinutes(b.totalDuration) || Infinity) || (fareA || Infinity) - (fareB || Infinity);
       }
       return multiEmergencyRankScore(b, selectedSortClass) - multiEmergencyRankScore(a, selectedSortClass) ||
         (b.score || 0) - (a.score || 0);
@@ -1221,6 +1249,7 @@ export function TrainResultsWorkspace() {
               <option value="lowestLayover">Lowest layover first</option>
               <option value="earliest">Earliest departure</option>
               <option value="latest">Latest departure</option>
+              <option value="availability">Availability first</option>
             </select>
             <input
               value={pendingMaxFare}
