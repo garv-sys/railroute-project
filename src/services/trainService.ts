@@ -611,6 +611,7 @@ function normalizeStationCode(code: string) {
     'JHARSUGUDA': 'JSG',
     'JHARSUGUDA JN': 'JSG',
     'DUMRAON': 'DURE',
+    'DMN': 'DURE',
     'PUNE': 'PUNE',
     'POONA': 'PUNE',
     'PUNE JN': 'PUNE',
@@ -1230,6 +1231,7 @@ const USER_PRIORITY_HUBS = new Set([
   'AGC', 'MTJ',
   'BSB', 'BSBS',
   'JP', 'AII', 'AWR', 'AJM', 'BKN', 'JU', 'UDZ',
+  'MTJ', 'JHS', 'KOTA',
   // Secondary hubs
   'ASN', 'HWH', 'TATA', 'RNC', 'HTE', 'MURI',
   'BSP', 'R', 'DURG',
@@ -2616,12 +2618,14 @@ export async function generateSplitCandidates(
     const hubCount = hubCounts.get(c.hub) || 0;
     const t1Count = trainCounts.get(tn1) || 0;
     const t2Count = trainCounts.get(tn2) || 0;
-    if (hubCount >= 8) {
+    if (hubCount >= 4) {
       console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Diversity filter (too many routes for hub ${c.hub}).`);
       continue;
     }
-    if (t1Count >= 8 && t2Count >= 8) {
-      console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Diversity filter (too many repetitions for trains).`);
+    // Per-Leg-1 train cross-hub cap: each train can only serve as Leg 1 in at most 3 different hubs
+    // This prevents one dominant train (e.g. 12309 NDLS Rajdhani) from monopolizing all hubs
+    if (t1Count >= 3) {
+      console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Leg-1 train ${tn1} already used in 3 hubs.`);
       continue;
     }
     diverse.push(c);
@@ -2842,6 +2846,9 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const legOpts: TrainSearchOptions = { ...options, fetchLive: false, providerPairLimit: 2, maxSplitCandidates: 100 };
   const allRoutes: any[] = [];
   const seen = new Set<string>();
+  // Cross-hub Leg-1 train cap: prevents one dominant train from monopolizing many hubs
+  const globalT1Contrib = new Map<string, number>();
+  const GLOBAL_T1_CAP = 4;
 
   for (const hub of hubs.slice(0, 20)) {
     if (Date.now() - startTime > timeout - 3000) {
@@ -2946,9 +2953,13 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
 
           const key = `${tn1}_${hub}_${tn2}`;
           if (seen.has(key)) continue;
+          // Cross-hub Leg-1 cap check
+          const globalT1Count = globalT1Contrib.get(tn1) || 0;
+          if (globalT1Count >= GLOBAL_T1_CAP) continue;
           seen.add(key);
           hubContrib++;
           trainContrib.set(tn1, t1Count + 1);
+          globalT1Contrib.set(tn1, globalT1Count + 1);
 
           allRoutes.push({
             hub,
@@ -2964,9 +2975,25 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   }
   console.log(`[TRACER] [findSmartRoutesForDate] 3. Split Route Candidates generated count: ${allRoutes.length}`);
 
+  // Interleave routes by hub so each hub gets fair enrichment slots (round-robin)
+  const byHubMap = new Map<string, any[]>();
+  for (const r of allRoutes) {
+    if (!byHubMap.has(r.hub)) byHubMap.set(r.hub, []);
+    byHubMap.get(r.hub)!.push(r);
+  }
+  const interleavedRoutes: any[] = [];
+  let moreToAdd = true;
+  while (moreToAdd) {
+    moreToAdd = false;
+    for (const list of byHubMap.values()) {
+      if (list.length > 0) { interleavedRoutes.push(list.shift()); moreToAdd = true; }
+    }
+  }
+  console.log(`[TRACER] [findSmartRoutesForDate] 3a. Interleaved ${interleavedRoutes.length} routes across ${byHubMap.size} hubs`);
+
   const results: SplitRouteResult[] = [];
   let enriched = 0;
-  for (const route of allRoutes) {
+  for (const route of interleavedRoutes) {
     if (enriched >= 120) break;
     const routeString = `${route.t1.trainNo || route.t1.train_no} -> ${route.hub} -> ${route.t2.trainNo || route.t2.train_no}`;
     try {
