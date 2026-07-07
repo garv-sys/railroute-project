@@ -2843,7 +2843,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const allRoutes: any[] = [];
   const seen = new Set<string>();
 
-  for (const hub of hubs.slice(0, 80)) {
+  for (const hub of hubs.slice(0, 12)) {
     if (Date.now() - startTime > timeout - 3000) {
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Timeout exceeded during hub search.`);
       break;
