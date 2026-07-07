@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       plannerLegTimeoutMs: 3500,
       providerPairLimit: 2,
       fetchLive: false,
-    }, 30);
+    }, 60);
 
     console.log(`[search-split-candidates] ${source}→${destination} on ${date}: ${candidates.length} candidates`);
 
