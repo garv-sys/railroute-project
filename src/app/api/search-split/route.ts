@@ -105,8 +105,16 @@ export async function POST(request: Request) {
     };
 
     const parseFareVal = (fareStrOrNum: any) => {
-      const fareStr = String(fareStrOrNum || '');
-      return Number(fareStr.replace(/[^\d.]/g, '')) || 0;
+      if (typeof fareStrOrNum === 'number') return fareStrOrNum;
+      const fareStr = String(fareStrOrNum || '').trim();
+      if (/fail|error|unavailable|booking|between|cooldown|not|reason|exception/i.test(fareStr)) {
+        return 0;
+      }
+      const match = fareStr.match(/(?:₹\s*)?(\d+(?:[.,]\d+)?)/);
+      if (match) {
+        return Math.round(Number(match[1].replace(/,/g, ''))) || 0;
+      }
+      return 0;
     };
 
     const cleanTrain = (no: string) => String(no || '').trim().replace(/\D/g, '');
