@@ -2709,9 +2709,21 @@ export async function enrichSplitCandidates(
   const formattedDate = formatDateStr(date);
   const results: SplitRouteResult[] = [];
 
-  const safeParseFare = (v: unknown) => Number(String(v || '').replace(/[^\d.]/g, '')) || 0;
+  const safeParseFare = (fareStrOrNum: unknown) => {
+    if (typeof fareStrOrNum === 'number') return fareStrOrNum;
+    const fareStr = String(fareStrOrNum || '').trim();
+    if (/fail|error|unavailable|booking|between|cooldown|not|reason|exception/i.test(fareStr)) {
+      return 0;
+    }
+    const match = fareStr.match(/(?:₹\s*)?(\d+(?:[.,]\d+)?)/);
+    if (match) {
+      return Math.round(Number(match[1].replace(/,/g, ''))) || 0;
+    }
+    return 0;
+  };
 
-  for (const cand of rawCandidates) {
+  // Process all candidates in parallel to prevent Vercel 10s/15s timeouts
+  await Promise.all(rawCandidates.map(async (cand) => {
     const routeString = `${cand.t1.trainNo || cand.t1.train_no} -> ${cand.hub} -> ${cand.t2.trainNo || cand.t2.train_no}`;
     try {
       const l1ArrRaw = cand.t1.arrivalTime || cand.t1.to_time || cand.t1.to_std || '';
@@ -2748,7 +2760,7 @@ export async function enrichSplitCandidates(
       const l2Dep = e2.departureTime || '';
       if (!l1Arr || !l2Dep) {
         console.log(`[TRACER] Validation: Rejected route "${routeString}" during enrichment - missing departure/arrival times.`);
-        continue;
+        return;
       }
 
       const arrivalMs = parseTime(l1Arr, formattedDate).getTime();
@@ -2761,7 +2773,7 @@ export async function enrichSplitCandidates(
       
       if (layoverHrs < minLayoverHrs || layoverHrs > 24) {
         console.log(`[TRACER] Validation: Rejected route "${routeString}" during enrichment - layover of ${layoverHrs.toFixed(2)}h is outside [${minLayoverHrs}, 24] range.`);
-        continue;
+        return;
       }
 
       const c1 = e1.confirmationChance !== undefined ? e1.confirmationChance : 100;
@@ -2800,7 +2812,7 @@ export async function enrichSplitCandidates(
       console.warn(`[enrichSplitCandidates] failed hub=${cand.hub}:`, e);
       console.log(`[TRACER] Validation: Rejected route "${routeString}" - enrichment threw exception:`, e);
     }
-  }
+  }));
 
   const diverseResults = selectDiverseHubRoutes(results, 15);
   console.log(`[TRACER] 5. Enrichment Finished: successfully enriched split routes count=${diverseResults.length}`);
