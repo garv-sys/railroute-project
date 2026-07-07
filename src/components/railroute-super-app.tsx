@@ -2014,9 +2014,9 @@ export function RailRouteSuperApp() {
           const candRes = await postJson<{ candidates: any[] }>("/api/search-split-candidates", { source, destination, date, classType });
           const allCandidates: any[] = candRes.candidates || [];
           if (allCandidates.length > 0) {
-            // Phase 2: Enrich first batch of 8 immediately
-            const firstBatch = allCandidates.slice(0, 8);
-            const rest = allCandidates.slice(8);
+            // Phase 2: Enrich first batch of 15 immediately (buffer for non-running-day filtering)
+            const firstBatch = allCandidates.slice(0, 15);
+            const rest = allCandidates.slice(15);
             setSplitPendingQueue(rest);
             setSplitHasMore(rest.length > 0);
             setSplitLoadingMore(true);
@@ -2646,9 +2646,9 @@ export function RailRouteSearchWorkspace({
           const candRes = await postJson<{ candidates: any[] }>("/api/search-split-candidates", { source, destination, date, classType });
           const allCandidates: any[] = candRes.candidates || [];
           if (allCandidates.length > 0) {
-            // Phase 2: Enrich first batch of 8 immediately
-            const firstBatch = allCandidates.slice(0, 8);
-            const rest = allCandidates.slice(8);
+            // Phase 2: Enrich first batch of 15 immediately (buffer for non-running-day filtering)
+            const firstBatch = allCandidates.slice(0, 15);
+            const rest = allCandidates.slice(15);
             setSplitPendingQueue(rest);
             setSplitHasMore(rest.length > 0);
             setSplitLoadingMore(true);

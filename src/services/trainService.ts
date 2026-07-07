@@ -2754,6 +2754,27 @@ export async function enrichSplitCandidates(
       let f1 = safeParseFare(e1.fare);
       let f2 = safeParseFare(e2.fare);
 
+      // Hard reject: if IRCTC says the train does not operate on this date, skip this candidate entirely.
+      // "not available for booking for this date" means wrong running day — don't show with fake "Check seats".
+      const isNotRunning = (leg: any) => {
+        const reason = String(leg?.lookupReason || leg?.availability || '').toLowerCase();
+        const avail = String(leg?.availability || '').toLowerCase();
+        return (
+          reason.includes('not available for booking for this date') ||
+          reason.includes('train not on scheduled date') ||
+          avail === 'not running' ||
+          leg?.availabilityStatus === 'NOT_RUNNING'
+        );
+      };
+      if (isNotRunning(e1)) {
+        console.log(`[TRACER] Rejected route "${routeString}" - Leg 1 (${e1.trainNo}) does not run on ${formattedDate}.`);
+        return;
+      }
+      if (isNotRunning(e2)) {
+        console.log(`[TRACER] Rejected route "${routeString}" - Leg 2 (${e2.trainNo}) does not run on ${formattedDate}.`);
+        return;
+      }
+
       // Fallback policy: never discard routes because live fare is 0 (e.g. key missing)
       if (f1 === 0) {
         f1 = getFallbackMockFare(e1.trainNo, e1.source, e1.destination, classType || '3A');
