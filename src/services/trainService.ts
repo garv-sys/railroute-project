@@ -2905,13 +2905,20 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         continue;
       }
 
-      // Per-hub diversity cap: each hub contributes at most 10 candidates to final pool
-      const hubCap = 10;
+      // Per-hub diversity cap: each hub contributes at most 20 candidates, with a max of 3 per individual Leg 1 train
+      const hubCap = 20;
+      const trainCap = 3;
       let hubContrib = 0;
+      const trainContrib = new Map<string, number>();
+
       for (const t1 of filteredL1.slice(0, 20)) {
+        const tn1 = cleanTrainNo(t1.trainNo || t1.train_no);
         for (const t2 of filteredL2.slice(0, 20)) {
           if (hubContrib >= hubCap) break;
-          const tn1 = cleanTrainNo(t1.trainNo || t1.train_no);
+
+          const t1Count = trainContrib.get(tn1) || 0;
+          if (t1Count >= trainCap) break; // Break inner loop to move to the next Leg 1 train
+
           const tn2 = cleanTrainNo(t2.trainNo || t2.train_no);
           if (tn1 && tn2 && tn1 === tn2) {
             console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route SAME train: ${tn1}`);
@@ -2939,6 +2946,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
           if (seen.has(key)) continue;
           seen.add(key);
           hubContrib++;
+          trainContrib.set(tn1, t1Count + 1);
 
           allRoutes.push({
             hub,

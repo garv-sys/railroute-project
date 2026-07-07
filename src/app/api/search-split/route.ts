@@ -252,12 +252,26 @@ export async function POST(request: Request) {
       let durationMinutes = Number(route.totalDurationMinutes || route.durationMinutes || 0);
       if (!durationMinutes && route.leg1 && route.leg2) {
         const getMinutes = (durStr: string) => {
-          const match = String(durStr || '').match(/(\d+)\s*h\s*(\d+)?/i);
+          const str = String(durStr || '').trim();
+          if (str.includes(':')) {
+            const cleanStr = str.split(/\s+/)[0];
+            const parts = cleanStr.split(':').map(Number);
+            if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+              return parts[0] * 60 + parts[1];
+            }
+          }
+          const match = str.match(/(\d+)\s*h\s*(\d+)?/i);
           if (match) {
             const h = Number(match[1]);
             const m = Number(match[2] || 0);
             return h * 60 + m;
           }
+          const minsMatch = str.match(/(\d+)\s*(?:m|min|minutes)/i);
+          if (minsMatch) {
+            return Number(minsMatch[1]);
+          }
+          const rawNum = Number(str);
+          if (!isNaN(rawNum)) return rawNum;
           return 0;
         };
         const d1 = getMinutes(route.leg1.duration);
@@ -358,12 +372,26 @@ export async function POST(request: Request) {
         let durationMinutes = Number(route.totalDurationMinutes || route.durationMinutes || 0);
         if (!durationMinutes && route.legs) {
           const getMinutes = (durStr: string) => {
-            const match = String(durStr || '').match(/(\d+)\s*h\s*(\d+)?/i);
+            const str = String(durStr || '').trim();
+            if (str.includes(':')) {
+              const cleanStr = str.split(/\s+/)[0];
+              const parts = cleanStr.split(':').map(Number);
+              if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                return parts[0] * 60 + parts[1];
+              }
+            }
+            const match = str.match(/(\d+)\s*h\s*(\d+)?/i);
             if (match) {
               const h = Number(match[1]);
               const m = Number(match[2] || 0);
               return h * 60 + m;
             }
+            const minsMatch = str.match(/(\d+)\s*(?:m|min|minutes)/i);
+            if (minsMatch) {
+              return Number(minsMatch[1]);
+            }
+            const rawNum = Number(str);
+            if (!isNaN(rawNum)) return rawNum;
             return 0;
           };
           durationMinutes = route.legs.reduce((sum: number, leg: any) => sum + getMinutes(leg.duration), 0) + Number(route.layoverMinutes || 0);
