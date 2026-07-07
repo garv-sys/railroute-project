@@ -34,8 +34,8 @@ export async function POST(request: Request) {
       return validationFailure('Booking window is 60 days. Please select an earlier date.', requestId);
     }
 
-    // Safety: never process more than 10 at a time from one call
-    const batchToProcess = candidates.slice(0, 10);
+    // Safety: never process more than 15 at a time from one call
+    const batchToProcess = candidates.slice(0, 15);
 
     const enriched = await enrichSplitCandidates(
       batchToProcess,

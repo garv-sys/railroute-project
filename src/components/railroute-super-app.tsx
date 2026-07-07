@@ -2014,9 +2014,9 @@ export function RailRouteSuperApp() {
           const candRes = await postJson<{ candidates: any[] }>("/api/search-split-candidates", { source, destination, date, classType });
           const allCandidates: any[] = candRes.candidates || [];
           if (allCandidates.length > 0) {
-            // Phase 2: Enrich first batch of 5 immediately
-            const firstBatch = allCandidates.slice(0, 5);
-            const rest = allCandidates.slice(5);
+            // Phase 2: Enrich first batch of 8 immediately
+            const firstBatch = allCandidates.slice(0, 8);
+            const rest = allCandidates.slice(8);
             setSplitPendingQueue(rest);
             setSplitHasMore(rest.length > 0);
             setSplitLoadingMore(true);
@@ -2059,8 +2059,8 @@ export function RailRouteSuperApp() {
     if (splitLoadingRef.current || !splitHasMore || splitPendingQueue.length === 0) return;
     setSplitLoadingMore(true);
     splitLoadingRef.current = true;
-    const nextBatch = splitPendingQueue.slice(0, 5);
-    const remaining = splitPendingQueue.slice(5);
+    const nextBatch = splitPendingQueue.slice(0, 8);
+    const remaining = splitPendingQueue.slice(8);
     try {
       const res = await postJson<{ routes: any[] }>("/api/search-split-enrich", {
         candidates: nextBatch,
@@ -2646,9 +2646,9 @@ export function RailRouteSearchWorkspace({
           const candRes = await postJson<{ candidates: any[] }>("/api/search-split-candidates", { source, destination, date, classType });
           const allCandidates: any[] = candRes.candidates || [];
           if (allCandidates.length > 0) {
-            // Phase 2: Enrich first batch of 5 immediately
-            const firstBatch = allCandidates.slice(0, 5);
-            const rest = allCandidates.slice(5);
+            // Phase 2: Enrich first batch of 8 immediately
+            const firstBatch = allCandidates.slice(0, 8);
+            const rest = allCandidates.slice(8);
             setSplitPendingQueue(rest);
             setSplitHasMore(rest.length > 0);
             setSplitLoadingMore(true);
@@ -2696,8 +2696,8 @@ export function RailRouteSearchWorkspace({
     if (splitLoadingRef.current || !splitHasMore || splitPendingQueue.length === 0) return;
     setSplitLoadingMore(true);
     splitLoadingRef.current = true;
-    const nextBatch = splitPendingQueue.slice(0, 5);
-    const remaining = splitPendingQueue.slice(5);
+    const nextBatch = splitPendingQueue.slice(0, 8);
+    const remaining = splitPendingQueue.slice(8);
     try {
       const res = await postJson<{ routes: any[] }>("/api/search-split-enrich", {
         candidates: nextBatch,

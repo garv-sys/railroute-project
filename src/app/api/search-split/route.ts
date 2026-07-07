@@ -155,7 +155,7 @@ export async function POST(request: Request) {
       return selected;
     };
 
-    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 20);
+    const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 40);
     console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
     const verifiedRoutes: any[] = [];
@@ -328,7 +328,7 @@ export async function POST(request: Request) {
     if (total2LegAndDirectCount < 15 && multiSplitRoutes && multiSplitRoutes.length > 0) {
       console.log(`[search-split] 2-leg + direct count is ${total2LegAndDirectCount} (< 15). Running 3-leg split enrichment...`);
       const perRouteTimeoutMs = 6000;
-      const LIVE_TOP_MULTI = Math.min(10, multiSplitRoutes.length);
+      const LIVE_TOP_MULTI = Math.min(15, multiSplitRoutes.length);
 
       await Promise.all(multiSplitRoutes.slice(0, LIVE_TOP_MULTI).map(async (route, index) => {
         const legs = route.legs || [];

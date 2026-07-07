@@ -2480,7 +2480,7 @@ export async function generateSplitCandidates(
   const timeout = (options.globalTimeoutMs || 20000) - 3000; // leave 3 s for caller
 
   // Use the existing intelligent hub discovery — covers ALL stations in the graph
-  const rawHubs = dynamicSplitHubCandidates(source, dest, '', 50);
+  const rawHubs = dynamicSplitHubCandidates(source, dest, '', 80);
   const hubs = rawHubs.filter((h) => h !== source && h !== dest);
   console.log(`[TRACER] 2. Hub Generation: Total candidates discovered: ${rawHubs.length}. Filtered hubs: ${hubs.join(', ')}`);
   for (const hub of hubs) {
@@ -2523,8 +2523,8 @@ export async function generateSplitCandidates(
         continue;
       }
 
-      for (const t1 of l1.slice(0, 8)) {
-        for (const t2 of l2.slice(0, 8)) {
+      for (const t1 of l1.slice(0, 10)) {
+        for (const t2 of l2.slice(0, 10)) {
           totalRoutesGeneratedCount++;
           const tn1 = (t1.trainNo || t1.train_no || '').toString().replace(/\D/g, '');
           const tn2 = (t2.trainNo || t2.train_no || '').toString().replace(/\D/g, '');
@@ -2544,7 +2544,7 @@ export async function generateSplitCandidates(
           seen.add(key);
           // Per-hub cap: skip if this hub already contributed too many
           const hubContrib = hubContributions.get(hub) || 0;
-          if (hubContrib >= 8) continue;
+          if (hubContrib >= 10) continue;
           hubContributions.set(hub, hubContrib + 1);
 
           // Rough layover estimate
@@ -2608,7 +2608,7 @@ export async function generateSplitCandidates(
   candidates.sort((a, b) => b.score - a.score);
   for (const c of candidates) {
     if (diverse.length >= limit) {
-      console.log(`[TRACER] Validation: Rejected candidate ${c.t1.trainNo} -> ${c.hub} -> ${c.t2.trainNo} - Exceeded Top 15 final limit.`);
+      console.log(`[TRACER] Validation: Rejected candidate ${c.t1.trainNo} -> ${c.hub} -> ${c.t2.trainNo} - Exceeded final limit of ${limit}.`);
       continue;
     }
     const tn1 = (c.t1.trainNo || c.t1.train_no || '').toString().replace(/\D/g, '');
@@ -2616,7 +2616,7 @@ export async function generateSplitCandidates(
     const hubCount = hubCounts.get(c.hub) || 0;
     const t1Count = trainCounts.get(tn1) || 0;
     const t2Count = trainCounts.get(tn2) || 0;
-    if (hubCount >= 5) {
+    if (hubCount >= 8) {
       console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Diversity filter (too many routes for hub ${c.hub}).`);
       continue;
     }
@@ -2843,7 +2843,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const allRoutes: any[] = [];
   const seen = new Set<string>();
 
-  for (const hub of hubs.slice(0, 12)) {
+  for (const hub of hubs.slice(0, 20)) {
     if (Date.now() - startTime > timeout - 3000) {
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Timeout exceeded during hub search.`);
       break;
@@ -2906,8 +2906,10 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       }
 
       // Per-hub diversity cap: each hub contributes at most 20 candidates, with a max of 3 per individual Leg 1 train
-      const hubCap = 20;
-      const trainCap = 3;
+      // hubCap: max candidates per hub before moving to next hub
+      // trainCap: max candidates per individual Leg 1 train — ensures diversity across trains
+      const hubCap = 30;
+      const trainCap = 4;
       let hubContrib = 0;
       const trainContrib = new Map<string, number>();
 
@@ -2965,7 +2967,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const results: SplitRouteResult[] = [];
   let enriched = 0;
   for (const route of allRoutes) {
-    if (enriched >= 80) break;
+    if (enriched >= 120) break;
     const routeString = `${route.t1.trainNo || route.t1.train_no} -> ${route.hub} -> ${route.t2.trainNo || route.t2.train_no}`;
     try {
       // 1. Validate Leg 1 runs on the request date
