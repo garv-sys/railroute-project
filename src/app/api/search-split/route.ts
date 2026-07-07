@@ -209,7 +209,10 @@ export async function POST(request: Request) {
           } else {
             const leg1HasResponse = route.leg1?.availabilityStatus && route.leg1.availabilityStatus !== 'PROVIDER_UNAVAILABLE';
             const leg2HasResponse = route.leg2?.availabilityStatus && route.leg2.availabilityStatus !== 'PROVIDER_UNAVAILABLE';
-            if (leg1HasResponse && leg2HasResponse) {
+            const isLeg1FarOut = String(route.leg1?.lookupReason).includes("opens closer to travel");
+            const isLeg2FarOut = String(route.leg2?.lookupReason).includes("opens closer to travel");
+
+            if ((leg1HasResponse || isLeg1FarOut) && (leg2HasResponse || isLeg2FarOut)) {
               unverifiedRoutes.push(route);
             }
           }
@@ -346,7 +349,8 @@ export async function POST(request: Request) {
       const validMulti = multiSplitRoutes.filter(route => {
         const legs = route.legs || [];
         return legs.length > 0 && legs.every((leg: any) => {
-          return leg.availabilityStatus && leg.availabilityStatus !== 'PROVIDER_UNAVAILABLE';
+          const isFarOut = String(leg.lookupReason).includes("opens closer to travel");
+          return isFarOut || (leg.availabilityStatus && leg.availabilityStatus !== 'PROVIDER_UNAVAILABLE');
         });
       });
 
