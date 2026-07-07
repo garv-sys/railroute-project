@@ -275,7 +275,7 @@ export async function searchDirectTrains(fromStn: string, toStn: string, date?: 
       ensureIrctcConfigured();
       const primary = await callWithRetry(
         () => trainListQueue.add(() => trackProviderCall('train-list', `${fromStn}->${toStn}:${dateStr}`, () => searchTrainBetweenStations(fromStn, toStn, dateStr))),
-        2,
+        4,
         'train-list'
       );
       if (isRateLimitedResult(primary)) {
@@ -368,7 +368,7 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
 
     try {
       console.log(`[IRCTC] [RAW-CALL] Fetching seat availability for Train ${trainNo} (${fromStn}->${toStn}) on ${dateStr} [Class: ${normalizedClass}, Quota: ${quota}]`);
-      let response: any = await callWithRetry(doFetch, 1, 'availability');
+      let response: any = await callWithRetry(doFetch, 3, 'availability');
       console.log(`[IRCTC] [RAW-RESPONSE] Provider response for Train ${trainNo} (${fromStn}->${toStn}):`, JSON.stringify(response));
 
       let rows = Array.isArray(response?.data?.availability) ? response.data.availability : [];
@@ -379,7 +379,7 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
       if (rows.length === 0 || hasNoFare) {
         console.log(`[IRCTC] Empty availability or missing fare. Retrying once for Train ${trainNo} after 2000ms...`);
         await new Promise((r) => setTimeout(r, 2000));
-        const retryResponse = await callWithRetry(doFetch, 1, 'availability');
+        const retryResponse = await callWithRetry(doFetch, 3, 'availability');
         console.log(`[IRCTC] [RAW-RETRY-RESPONSE] Retry response for Train ${trainNo}:`, JSON.stringify(retryResponse));
         
         const retryRows = Array.isArray(retryResponse?.data?.availability) ? retryResponse.data.availability : [];
