@@ -2622,10 +2622,10 @@ export async function generateSplitCandidates(
       console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Diversity filter (too many routes for hub ${c.hub}).`);
       continue;
     }
-    // Per-Leg-1 train cross-hub cap: each train can only serve as Leg 1 in at most 3 different hubs
-    // This prevents one dominant train (e.g. 12309 NDLS Rajdhani) from monopolizing all hubs
-    if (t1Count >= 3) {
-      console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Leg-1 train ${tn1} already used in 3 hubs.`);
+    // Per-Leg-1 train cross-hub cap: each train can only serve as Leg 1 in at most 15 candidates
+    // This allows sparse routes with only a few trains to still find plenty of options, while keeping overall variety.
+    if (t1Count >= 15) {
+      console.log(`[TRACER] Validation: Rejected candidate ${tn1} -> ${c.hub} -> ${tn2} - Leg-1 train ${tn1} already used in 15 candidates.`);
       continue;
     }
     diverse.push(c);
@@ -2846,9 +2846,9 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const legOpts: TrainSearchOptions = { ...options, fetchLive: false, providerPairLimit: 2, maxSplitCandidates: 100 };
   const allRoutes: any[] = [];
   const seen = new Set<string>();
-  // Cross-hub Leg-1 train cap: prevents one dominant train from monopolizing many hubs
+  // Cross-hub Leg-1 train cap: prevents one dominant train from monopolizing many hubs, but relaxed to allow enough combinations on thin routes.
   const globalT1Contrib = new Map<string, number>();
-  const GLOBAL_T1_CAP = 4;
+  const GLOBAL_T1_CAP = 15;
 
   for (const hub of hubs.slice(0, 20)) {
     if (Date.now() - startTime > timeout - 3000) {

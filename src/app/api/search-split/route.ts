@@ -211,8 +211,11 @@ export async function POST(request: Request) {
             const leg2HasResponse = route.leg2?.availabilityStatus && route.leg2.availabilityStatus !== 'PROVIDER_UNAVAILABLE';
             const isLeg1FarOut = String(route.leg1?.lookupReason).includes("opens closer to travel");
             const isLeg2FarOut = String(route.leg2?.lookupReason).includes("opens closer to travel");
-
-            if ((leg1HasResponse || isLeg1FarOut) && (leg2HasResponse || isLeg2FarOut)) {
+            // Include PROVIDER_UNAVAILABLE routes too — for sparse routes (small stations, thin corridors)
+            // the provider simply can't confirm seats, but the trains exist and should be shown
+            const leg1Acceptable = leg1HasResponse || isLeg1FarOut || route.leg1?.availabilityStatus === 'PROVIDER_UNAVAILABLE';
+            const leg2Acceptable = leg2HasResponse || isLeg2FarOut || route.leg2?.availabilityStatus === 'PROVIDER_UNAVAILABLE';
+            if (leg1Acceptable && leg2Acceptable) {
               unverifiedRoutes.push(route);
             }
           }
