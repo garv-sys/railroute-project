@@ -2511,10 +2511,20 @@ export async function generateSplitCandidates(
     // to ensure we keep exploring many diverse hubs rather than stopping early
     const hubContributions = new Map<string, number>();
     try {
-      const [l1, l2] = await Promise.all([
-        searchTrainsSmart(source, hub, formattedDate, legOpts),
-        searchTrainsSmart(hub, dest, formattedDate, legOpts),
-      ]);
+      let l1 = await searchTrainsSmart(source, hub, formattedDate, legOpts);
+      let l2 = await searchTrainsSmart(hub, dest, formattedDate, legOpts);
+
+      // Live fallback: if local search returns 0 results, query live provider in parallel
+      if (l1.length === 0 || l2.length === 0) {
+        const fallbackTasks: Promise<any>[] = [];
+        if (l1.length === 0) {
+          fallbackTasks.push(searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true }).then(res => l1 = res));
+        }
+        if (l2.length === 0) {
+          fallbackTasks.push(searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true }).then(res => l2 = res));
+        }
+        await Promise.all(fallbackTasks);
+      }
 
       if (!l1.length) {
         console.log(`[TRACER] Validation: Rejected hub "${hub}" because no trains exist on first leg: ${source} -> ${hub}`);
