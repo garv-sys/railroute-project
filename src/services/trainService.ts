@@ -2850,14 +2850,16 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const globalT1Contrib = new Map<string, number>();
   const GLOBAL_T1_CAP = 15;
 
-  for (const hub of hubs.slice(0, 20)) {
+  // Parallelize the hub exploration loop to avoid sequential network delays and allow more live candidates.
+  await Promise.all(hubs.slice(0, 20).map(async (hub) => {
     if (Date.now() - startTime > timeout - 3000) {
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Timeout exceeded during hub search.`);
-      break;
+      return;
     }
     try {
       const hubIndex = hubs.indexOf(hub);
-      const useLive = hubIndex < 4 && options.fetchLive !== false;
+      // Always fetch live trains for the first 6 hubs to ensure fresh, accurate schedules on major routes.
+      const useLive = hubIndex < 6;
       let l1: any[] = [];
       let l2: any[] = [];
 
@@ -2897,7 +2899,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
 
       if (l1.length === 0 || l2.length === 0) {
         console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected hub "${hub}" - no trains running on date after day-of-week filter.`);
-        continue;
+        return;
       }
 
       const cleanClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
@@ -2909,12 +2911,10 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       }
 
       if (filteredL1.length === 0 || filteredL2.length === 0) {
-        continue;
+        return;
       }
 
-      // Per-hub diversity cap: each hub contributes at most 20 candidates, with a max of 3 per individual Leg 1 train
-      // hubCap: max candidates per hub before moving to next hub
-      // trainCap: max candidates per individual Leg 1 train — ensures diversity across trains
+      // Per-hub diversity cap: each hub contributes at most 30 candidates, with a max of 4 per individual Leg 1 train
       const hubCap = 30;
       const trainCap = 4;
       let hubContrib = 0;
@@ -2972,7 +2972,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
     } catch (e) {
       console.warn(`[split] hub ${hub} failed:`, e);
     }
-  }
+  }));
   console.log(`[TRACER] [findSmartRoutesForDate] 3. Split Route Candidates generated count: ${allRoutes.length}`);
 
   // Interleave routes by hub so each hub gets fair enrichment slots (round-robin)
