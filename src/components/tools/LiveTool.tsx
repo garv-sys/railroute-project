@@ -102,6 +102,29 @@ export function LiveTool() {
   const [trainNo, setTrainNo] = useState("12395");
   const [date, setDate] = useState(todayIso());
   const [state, setState] = useState<{ loading: boolean; error: string; data: any | null }>({ loading: false, error: "", data: null });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const initialTrain = (params.get("train") || params.get("trainNo") || "").replace(/\D/g, "").slice(0, 5);
+    const initialDate = params.get("date") || "";
+
+    if (initialTrain) setTrainNo(initialTrain);
+    if (initialDate) setDate(initialDate);
+
+    if (initialTrain && initialTrain.length >= 4) {
+      const d = initialDate || todayIso();
+      setState({ loading: true, error: "", data: null });
+      fetch("/api/live", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ trainNo: initialTrain, date: d }),
+      })
+        .then((res) => res.json())
+        .then((payload) => setState({ loading: false, error: "", data: payload }))
+        .catch((error) => setState({ loading: false, error: error instanceof Error ? error.message : "Live lookup failed.", data: null }));
+    }
+  }, []);
   async function check(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const cleanTrainNo = trainNo.replace(/\D/g, "").slice(0, 5);

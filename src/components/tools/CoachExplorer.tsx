@@ -98,6 +98,21 @@ export function CoachExplorer({ initialClass = "3A", embedded = false, train }: 
   const [classType, setClassType] = useState(initialClass);
   const [coach, setCoach] = useState(() => defaultCoachFor(initialClass));
   const [selected, setSelected] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const cType = params.get("class") || params.get("classType") || "";
+    const cCoach = params.get("coach") || "";
+    if (cType && classOptions.includes(cType.toUpperCase())) {
+      const upper = cType.toUpperCase();
+      setClassType(upper);
+      if (cCoach) setCoach(cCoach.toUpperCase());
+      else setCoach(defaultCoachFor(upper));
+    } else if (cCoach) {
+      setCoach(cCoach.toUpperCase());
+    }
+  }, []);
   const seats = useMemo(() => buildCoachSeats(classType, coach), [classType, coach]);
   const coachOptions = compatibleCoaches(classType);
   const seatGroups = useMemo(() => groupSeatsForClass(classType, seats), [classType, seats]);
@@ -321,7 +336,7 @@ export function normalizePnrCoachText(passenger: any, currentStatus: string) {
 
   let coach = pick(coachKeys);
   let berth = pick(berthKeys);
-  let seat = pick(seatKeys);
+  const seat = pick(seatKeys);
 
   const details = passenger?.current?.details || passenger?.booking?.details || passenger?.details || "";
   if (details && typeof details === "string" && (!coach || !berth)) {

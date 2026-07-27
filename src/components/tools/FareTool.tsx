@@ -108,6 +108,43 @@ export function FareTool() {
   const [classType, setClassType] = useState("ALL");
   const [quota, setQuota] = useState("GN");
   const [state, setState] = useState<{ loading: boolean; error: string; data: any | null }>({ loading: false, error: "", data: null });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const initialTrain = (params.get("train") || params.get("trainNo") || "").replace(/\D/g, "").slice(0, 5);
+    const rawFrom = params.get("from") || params.get("source") || "";
+    const rawTo = params.get("to") || params.get("destination") || "";
+    const initialDate = params.get("date") || "";
+    const initialClass = params.get("class") || params.get("classType") || "";
+    const initialQuota = params.get("quota") || "";
+
+    const resolvedSource = rawFrom ? resolveStationInput("", rawFrom) || rawFrom.toUpperCase() : "";
+    const resolvedDestination = rawTo ? resolveStationInput("", rawTo) || rawTo.toUpperCase() : "";
+
+    if (initialTrain) setTrainNo(initialTrain);
+    if (resolvedSource) {
+      setSource(resolvedSource);
+      setSourceQuery(stationLabelFromCode(resolvedSource));
+    }
+    if (resolvedDestination) {
+      setDestination(resolvedDestination);
+      setDestinationQuery(stationLabelFromCode(resolvedDestination));
+    }
+    if (initialDate) setDate(initialDate);
+    if (initialClass) setClassType(initialClass);
+    if (initialQuota) setQuota(initialQuota);
+
+    if (initialTrain && resolvedSource && resolvedDestination) {
+      const d = initialDate || todayIso();
+      const c = initialClass || "ALL";
+      const q = initialQuota || "GN";
+      setState({ loading: true, error: "", data: null });
+      postJson("/api/fare", { trainNo: initialTrain, source: resolvedSource, destination: resolvedDestination, date: d, classType: c, quota: q, debug: debugModeEnabled() })
+        .then((data) => setState({ loading: false, error: "", data }))
+        .catch((error) => setState({ loading: false, error: error instanceof Error ? error.message : "Fare failed.", data: null }));
+    }
+  }, []);
   async function check() {
     const resolvedSource = resolveStationInput(source, sourceQuery);
     const resolvedDestination = resolveStationInput(destination, destinationQuery);

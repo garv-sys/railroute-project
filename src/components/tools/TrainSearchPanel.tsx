@@ -115,8 +115,9 @@ export function TrainSearchPanel({ compact = false }: { compact?: boolean }) {
   }
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const initialQuery = params.get("query");
+    const initialQuery = params.get("query") || params.get("train") || params.get("trainNo") || params.get("from") || "";
     if (initialQuery) {
       setQuery(initialQuery);
       window.setTimeout(() => search(undefined, initialQuery), 50);

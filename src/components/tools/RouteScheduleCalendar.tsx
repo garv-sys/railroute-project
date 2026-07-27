@@ -114,7 +114,7 @@ export function RouteScheduleCalendar({
     }
 
     if (!hasValidRoute) return [];
-    let connections: any[] = [];
+    const connections: any[] = [];
     for (const hub of MAJOR_HUBS) {
       const hubCode = hub.code;
       if (srcCodes.includes(hubCode) || dstCodes.includes(hubCode)) continue;

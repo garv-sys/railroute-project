@@ -500,27 +500,24 @@ export function TrainResultsWorkspace() {
     if (initialSource) {
       setSource(initialSource);
       setSourceQuery(stationCompactLabel(initialSource));
-    } else {
-      setSource("");
-      setSourceQuery("");
     }
     if (initialDestination) {
       setDestination(initialDestination);
       setDestinationQuery(stationCompactLabel(initialDestination));
-    } else {
-      setDestination("");
-      setDestinationQuery("");
     }
     if (initialPreferredHub) {
       setPreferredHub(initialPreferredHub);
       setPreferredHubQuery(stationCompactLabel(initialPreferredHub));
-    } else {
-      setPreferredHub("");
-      setPreferredHubQuery("");
     }
-    setDate(initialDate);
-    setClassType(initialClass);
-    setQuota(initialQuota);
+    if (params.get("date")) {
+      setDate(initialDate);
+    }
+    if (params.get("class") || params.get("classType")) {
+      setClassType(initialClass);
+    }
+    if (params.get("quota")) {
+      setQuota(initialQuota);
+    }
     if (hasExplicitRoute && initialSource && initialDestination) {
       window.setTimeout(() => runSearch(undefined, { source: initialSource, destination: initialDestination, date: initialDate, classType: initialClass, quota: initialQuota, preferredHub: initialPreferredHub }), 80);
     }
@@ -1882,6 +1879,8 @@ export function PremiumTrainCard({
     return () => { active = false; };
   }, [mapOpen, train.trainNo, mapRoute.length]);
 
+  const srcCode = String(actualSource || train?.source || "");
+  const dstCode = String(actualDestination || train?.destination || "");
   const mapStations = useMemo(() => {
     if (mapRoute && mapRoute.length > 0) {
       return mapRoute.map((stop: any) => ({
@@ -1890,10 +1889,10 @@ export function PremiumTrainCard({
       }));
     }
     return [
-      { code: actualSource || train.source, name: fullStationLabelFromCode(actualSource || train.source) },
-      { code: actualDestination || train.destination, name: fullStationLabelFromCode(actualDestination || train.destination) }
+      { code: srcCode, name: fullStationLabelFromCode(srcCode) },
+      { code: dstCode, name: fullStationLabelFromCode(dstCode) }
     ];
-  }, [mapRoute, actualSource, actualDestination, train.source, train.destination]);
+  }, [mapRoute, srcCode, dstCode]);
   const routeAvailable = Boolean(train.trainNo);
   const trustMeta = train.trustMeta || trustMetaFromTrain(train);
   const primaryClass = primaryClassCode(train);

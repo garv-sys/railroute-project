@@ -786,14 +786,16 @@ export function resolveStationInput(selectedCode: string, query: string) {
   if (selectedAliasCode) return selectedAliasCode;
   if (selectedCode) return selectedCode;
   const trimmed = query.trim();
+  const upperTrimmed = trimmed.toUpperCase();
+  if (/^[A-Z0-9]{2,6}$/.test(upperTrimmed)) return upperTrimmed;
   const aliasCode = stationAliasCodes(trimmed)[0];
   if (aliasCode) return aliasCode;
-  const exactCode = stationByCode(trimmed.toUpperCase());
+  const exactCode = stationByCode(upperTrimmed);
   if (exactCode) return exactCode.code;
   if (normalizeText(trimmed).length < 3) return "";
   const matches = stationMatches(trimmed, 1);
   if (matches && matches[0]) return matches[0].code;
-  return /^[A-Z0-9]{2,6}$/.test(trimmed) ? trimmed.toUpperCase() : "";
+  return "";
 }
 
 export function QuickSearch({ compact = false }: { compact?: boolean }) {

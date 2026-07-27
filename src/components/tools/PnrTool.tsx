@@ -108,6 +108,15 @@ export function PnrTool() {
     } catch (e) {
       console.warn("Failed to load saved PNRs:", e);
     }
+
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const pnrParam = params.get("pnr") || params.get("number") || "";
+      if (pnrParam && /^\d{10}$/.test(pnrParam)) {
+        setPnr(pnrParam);
+        triggerCheck(pnrParam);
+      }
+    }
   }, []);
 
   function savePnr(pnrVal: string, trainName: string) {
