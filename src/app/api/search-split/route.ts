@@ -1,4 +1,4 @@
-import { findMultiSplitRoutes, findSmartRoutes, enrichWithLiveAvailability, getFallbackMockFare } from '@/services/trainService';
+import { findMultiSplitRoutes, findSmartRoutes, enrichWithLiveAvailability, getFallbackMockFare, SPLIT_HUB_CORRIDORS } from '@/services/trainService';
 import { buildTrustMeta } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
@@ -118,46 +118,84 @@ export async function POST(request: Request) {
     };
 
     const cleanTrain = (no: string) => String(no || '').trim().replace(/\D/g, '');
+    const directTrainNos = new Set((directTrains || []).map((t: any) => cleanTrain(t.trainNo || t.train_no)).filter(Boolean));
 
-    const getDiverseSplitRoutes = (routes: any[], limit = 50) => {
-      const selected: any[] = [];
-      const trainCounts = new Map<string, number>();
-      const hubCounts = new Map<string, number>();
-
-      let remaining = [...routes];
-
-      while (selected.length < limit && remaining.length > 0) {
-        const scoredRemaining = remaining.map((r) => {
-          const t1 = cleanTrain(r.leg1?.trainNo);
-          const t2 = cleanTrain(r.leg2?.trainNo);
-          const t1Rep = trainCounts.get(t1) || 0;
-          const t2Rep = trainCounts.get(t2) || 0;
-          const penalty = (t1Rep + t2Rep) * 10;
-          return { route: r, score: (r.score || 0) - penalty };
-        });
-
-        scoredRemaining.sort((a, b) => b.score - a.score);
-        const bestItem = scoredRemaining[0];
-        const r = bestItem.route;
-
-        remaining = remaining.filter((x) => x !== r);
-
+    const getDiverseSplitRoutes = (routes: any[], limit = 40) => {
+      // 1. Exclude direct train numbers from split legs
+      const validCandidates = routes.filter((r) => {
         const t1 = cleanTrain(r.leg1?.trainNo);
         const t2 = cleanTrain(r.leg2?.trainNo);
-        if (!t1 || !t2) continue;
+        if (!t1 || !t2) return false;
+        if (t1 === t2) return false;
+        if (directTrainNos.has(t1) || directTrainNos.has(t2)) return false;
+        return true;
+      });
 
-        const hub = r.hubStation;
-        const hubCount = hubCounts.get(hub) || 0;
-        if (hubCount >= 12) continue;
+      // 2. Group candidates by city/terminal cluster
+      const routesByCluster = new Map<string, any[]>();
+      for (const r of validCandidates) {
+        const hubCode = String(r.hubStation || "").toUpperCase();
+        const cluster = SPLIT_HUB_CORRIDORS[hubCode] || hubCode;
+        if (!routesByCluster.has(cluster)) {
+          routesByCluster.set(cluster, []);
+        }
+        routesByCluster.get(cluster)!.push(r);
+      }
 
-        const t1Count = trainCounts.get(t1) || 0;
-        const t2Count = trainCounts.get(t2) || 0;
-        if (t1Count >= 8 && t2Count >= 8) continue;
+      for (const list of routesByCluster.values()) {
+        list.sort((a, b) => (b.score || 0) - (a.score || 0));
+      }
 
-        selected.push(r);
-        hubCounts.set(hub, hubCount + 1);
-        trainCounts.set(t1, t1Count + 1);
-        trainCounts.set(t2, t2Count + 1);
+      const selected: any[] = [];
+      const selectedKeys = new Set<string>();
+      const stationCounts = new Map<string, number>();
+      const clusterCounts = new Map<string, number>();
+      const trainCounts = new Map<string, number>();
+
+      const maxPerStation = 2;
+      const maxPerCluster = 3;
+      const maxPerTrain = 3;
+
+      let addedInPass = true;
+      let pass = 0;
+      while (selected.length < limit && addedInPass && pass < 5) {
+        addedInPass = false;
+        for (const [cluster, list] of routesByCluster.entries()) {
+          if (selected.length >= limit) break;
+          const clusterCount = clusterCounts.get(cluster) || 0;
+          if (clusterCount >= maxPerCluster) continue;
+
+          const cand = list.find((r) => {
+            const t1 = cleanTrain(r.leg1?.trainNo);
+            const t2 = cleanTrain(r.leg2?.trainNo);
+            const key = `${t1}_${r.hubStation}_${t2}`;
+            if (selectedKeys.has(key)) return false;
+
+            const stCount = stationCounts.get(r.hubStation) || 0;
+            if (stCount >= maxPerStation) return false;
+
+            const t1Count = trainCounts.get(t1) || 0;
+            const t2Count = trainCounts.get(t2) || 0;
+            if (t1Count >= maxPerTrain || t2Count >= maxPerTrain) return false;
+
+            return true;
+          });
+
+          if (cand) {
+            const t1 = cleanTrain(cand.leg1?.trainNo);
+            const t2 = cleanTrain(cand.leg2?.trainNo);
+            const key = `${t1}_${cand.hubStation}_${t2}`;
+
+            selected.push(cand);
+            selectedKeys.add(key);
+            stationCounts.set(cand.hubStation, (stationCounts.get(cand.hubStation) || 0) + 1);
+            clusterCounts.set(cluster, (clusterCounts.get(cluster) || 0) + 1);
+            trainCounts.set(t1, (trainCounts.get(t1) || 0) + 1);
+            trainCounts.set(t2, (trainCounts.get(t2) || 0) + 1);
+            addedInPass = true;
+          }
+        }
+        pass++;
       }
 
       return selected;
@@ -314,9 +352,22 @@ export async function POST(request: Request) {
       const c2 = getChance(route.leg2);
       const combinedChance = Math.round((c1 * c2) / 100);
 
-      // Score weightings: duration (-5 per minute), transfers (-250), availability (+2 per percent chance), fare (-0.05 per rupee)
-      const blendedScore = (combinedChance * 2.0) - (durationMinutes * 5.0) - (transfers * 250) - (route.totalFare * 0.05);
+      // Score weightings:
+      // durationHours (-8 per hour), availability (+1.5 per percent chance), layover quality bonus (+25 for 45m-3.5h layover)
+      const durationHours = durationMinutes / 60;
+      const layoverMins = Number(route.layoverMinutes || 0);
+      let layoverBonus = 0;
+      if (layoverMins >= 45 && layoverMins <= 210) {
+        layoverBonus = 25; // Sweet spot layover
+      } else if (layoverMins < 30) {
+        layoverBonus = -30; // Too tight / risky
+      } else if (layoverMins > 480) {
+        layoverBonus = -Math.round((layoverMins - 480) / 30) * 5; // Long wait
+      }
 
+      const blendedScore = (combinedChance * 1.5) - (durationHours * 8.0) + layoverBonus - (route.totalFare * 0.02);
+
+      route.score = blendedScore;
       route.rankingFactors = {
         durationMinutes,
         transfers,
@@ -330,7 +381,7 @@ export async function POST(request: Request) {
     });
 
     scoredRoutes.sort((a: any, b: any) => b.rankingFactors.blendedScore - a.rankingFactors.blendedScore);
-    const filteredSplitRoutes = scoredRoutes.slice(0, 15);
+    const filteredSplitRoutes = getDiverseSplitRoutes(scoredRoutes, 15);
 
     // Conditional 3-leg splits execution: only if 2-leg splits + direct combined is < 15
     const total2LegAndDirectCount = filteredSplitRoutes.length + directTrains.length;
