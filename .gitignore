@@ -34,8 +34,9 @@ yarn-error.log*
 .pnpm-debug.log*
 .scratch/
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -46,19 +47,26 @@ next-env.d.ts
 
 /src/generated/prisma
 
-# Cleanup rules
+# Cleanup & Temporary files
 dev.db
 *.db
 *.zip
 .scratch/
 scratch.js
 scratch.ts
+scratch_*.ts
+query-*.ts
 debug-*.js
+debug_*.ts
 test-*.js
 test-*.ts
+test_*.ts
 CLAUDE.md
 AGENTS.md
+.claude-flow/
+exports/
+railnail/
 
-# local copies & backup directories
+# Local copies & backup directories
 railroute-project/
 railroute-project 2/

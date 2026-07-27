@@ -2566,7 +2566,7 @@ export async function generateSplitCandidates(
           let estimatedLayoverHours: number | undefined;
           if (arr1 && dep2) {
             try {
-              let a1Ms = parseTime(arr1, formattedDate).getTime();
+              const a1Ms = parseTime(arr1, formattedDate).getTime();
               let d2Ms = parseTime(dep2, formattedDate).getTime();
               while (d2Ms < a1Ms) d2Ms += 86400000;
               estimatedLayoverHours = (d2Ms - a1Ms) / 3600000;
@@ -3065,8 +3065,8 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         enrichWithLiveAvailability({ ...route.t1 }, formattedDate, classType, liveOpts, quota),
         enrichWithLiveAvailability({ ...route.t2 }, formattedDate, classType, liveOpts, quota),
       ]);
-      let f1 = safeParseFare(e1.fare);
-      let f2 = safeParseFare(e2.fare);
+      const f1 = safeParseFare(e1.fare);
+      const f2 = safeParseFare(e2.fare);
 
       const l1Arr = e1.arrivalTime || '';
       const l2Dep = e2.departureTime || '';

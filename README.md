@@ -2,82 +2,71 @@
 
 # 🚆 RailRoute
 
-### Find your way when there's no direct train.
+### Smart Indian Railways Journey Planner — Split Routes, Direct Trains & Real-Time Availability
 
-**RailRoute** is a full-stack Indian Railways journey planner that finds optimal 2-leg split routes between cities with no direct connection — the problem that no official app solves.
+**RailRoute** is a production-ready, full-stack Indian Railways travel planner. It solves the critical problem where no direct trains have available seats between two stations by discovering, enriching, and ranking **optimal 2-leg and multi-leg split routes** via intermediate hubs — with live provider availability and clear data confidence badging.
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-railroute--project.vercel.app-blue?style=for-the-badge&logo=vercel)](https://railroute-project.vercel.app)
-[![TypeScript](https://img.shields.io/badge/TypeScript-97%25-3178C6?style=for-the-badge&logo=typescript)](https://github.com/garv-sys/railroute-project)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?style=for-the-badge&logo=typescript)](https://github.com/garv-sys/railroute-project)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
 
 </div>
 
 ---
 
-## The Story
+## 🌟 Features
 
-Every semester break, same thing — open IRCTC, type Jaipur to Patna,
-and either no trains, or the one train that runs is fully booked weeks
-in advance.
-
-So I'd start guessing. Maybe go via Agra? Via Lucknow? Manually check
-each intermediate station, open multiple tabs, cross-check timings.
-45 minutes later, still no ticket.
-
-There had to be a better way to find split routes. There wasn't.
-
-So I built one.
+- **Direct Train Engine** — Displays all direct train options with real-time seat availability and fare lookup.
+- **Split Journey Engine (Up to 15 Options)** — Automatically computes candidate 2-leg split routes via major railway hubs (e.g., Agra, Kanpur, Prayagraj, Jhansi, Delhi) and enriches up to 15 verified/ranked options.
+- **Multi-Leg Split Engine** — Intelligently computes 3-leg connection options when 2-leg options are sparse.
+- **Honest Data Confidence Badging** — Distinguishes between provider-verified seat availability (`VERIFIED`) and estimated mock fallbacks (`ESTIMATED — NOT CONFIRMED`) so users never rely on stale guesses.
+- **7,000+ Station Database** — Fast fuzzy search supporting station names and Indian Railways station codes.
+- **PNR & Live Running Status** — Check PNR status predictions, live train position, route schedules, and coach composition layouts.
+- **Interactive Route Map** — Visualizes connection hubs and route geography with Leaflet maps.
 
 ---
 
-## How It Works
+## 🛠️ Tech Stack
 
-Enter your origin and destination. RailRoute queries **7,000+ Indian stations**, finds trains that serve both legs of a split journey via an intermediate city, and ranks results by total travel time — all in one search.
-
-```
-Jaipur → [intermediate station] → Patna
-         ↑ RailRoute finds this for you
-```
-
----
-
-## Features
-
-- **Split Journey Search** — automatically finds 2-leg routes via intermediate stations
-- **7,000+ Station Database** — fuzzy search so partial names and typos still work  
-- **Real-time Schedule Data** — live train timings via RapidAPI Indian Railways
-- **Smart Ranking** — results sorted by total travel time and layover duration
-- **Clean UI** — built with shadcn/ui, works on mobile
+| Layer | Technology |
+|-------|------------|
+| **Framework** | Next.js 14 / 16 (App Router) |
+| **Language** | TypeScript |
+| **Styling & UI** | Tailwind CSS + shadcn/ui + Framer Motion |
+| **Database** | Prisma (SQLite for local dev / PostgreSQL for prod) |
+| **Cache & Rate Limiting** | Redis / In-Memory Rate Limiter |
+| **Train Data Provider** | IRCTC API Integration / `irctc-connect` |
+| **Deployment** | Vercel Serverless Functions |
 
 ---
 
-## Tech Stack
+## 🚀 Getting Started
 
-| Layer | Tech |
-|-------|------|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript |
-| Database | Prisma + SQLite |
-| UI | Tailwind CSS + shadcn/ui |
-| Train Data | RapidAPI Indian Railways |
-| Deployment | Vercel |
-
----
-
-## Getting Started
+### 1. Clone & Install
 
 ```bash
-# Clone the repo
 git clone https://github.com/garv-sys/railroute-project.git
 cd railroute-project
-
-# Install dependencies
 npm install
+```
 
-# Set up environment variables
+### 2. Configure Environment Variables
+
+```bash
 cp .env.example .env
-# Add your RapidAPI key to .env
+```
 
+Edit `.env` and set your credentials:
+```env
+IRCTC_API_KEY=your_irctc_api_key_here
+DATABASE_URL="file:./dev.db"
+REDIS_URL="redis://localhost:6379"
+NEXT_PUBLIC_API_URL="http://localhost:3000"
+```
+
+### 3. Initialize Database & Run Development Server
+
+```bash
 # Run database migrations
 npx prisma migrate dev
 
@@ -85,35 +74,48 @@ npx prisma migrate dev
 npm run dev
 ```
 
-Open [https://railroute-project.vercel.app](https://railroute-project.vercel.app)
-
-### Environment Variables
-
-```env
-RAPIDAPI_KEY=your_rapidapi_key_here
-DATABASE_URL="file:./dev.db"
-```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## Project Structure
+## 🐳 Docker Setup (Optional Local Services)
+
+If you prefer running a local PostgreSQL database and Redis server via Docker:
+
+```bash
+docker-compose up -d
+```
+
+This starts:
+- **PostgreSQL 15** on port `5432` (`postgres:password@localhost:5432/railroute`)
+- **Redis Alpine** on port `6379` (`redis://localhost:6379`)
+
+---
+
+## 📂 Project Structure
 
 ```
 src/
-├── app/              # Next.js App Router pages & API routes
-├── components/       # UI components
-├── lib/              # Train search logic, station database
-└── types/            # TypeScript types
+├── app/              # Next.js App Router pages and API routes
+│   ├── api/          # /search-direct, /search-split, /pnr, /status
+│   └── ...           # Application routes & layouts
+├── components/       # React UI components (shadcn, maps, search tools)
+├── lib/              # Routing logic, confidence scoring, station database
+└── services/         # IRCTC provider integration & train lookup engine
 prisma/
-└── schema.prisma     # Database schema
+└── schema.prisma     # Database schema & migrations
 ```
 
 ---
+
+## 🌍 Live Deployment
+
+Deployed at: **[https://railroute-project.vercel.app](https://railroute-project.vercel.app)**
 
 ---
 
 <div align="center">
 
-Built by [Garv Tandon](https://linkedin.com/in/garvtandon) · [LinkedIn](https://linkedin.com/in/garvtandon) · [GitHub](https://github.com/garv-sys)
+Built with ❤️ by [Garv Tandon](https://linkedin.com/in/garvtandon)
 
 </div>
