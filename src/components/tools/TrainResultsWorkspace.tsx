@@ -1918,6 +1918,9 @@ export function PremiumTrainCard({
             <DataBadge type={train.isCityTerminalOption ? "NEARBY BOARDING" : "LIVE"} label={train.isCityTerminalOption ? "Nearby / terminal train" : "Direct train"} />
             <DataBadge type={badgeTypeFromSource(trustMeta.source)} label={train.dataSource || trustMeta.provider} />
             {hasProviderFareOrAvailability && <DataBadge type="LIVE" label="Live Data Available" />}
+            {(!hasProviderFareOrAvailability || train.fareStatus === 'estimated') && (
+              <DataBadge type="ESTIMATED" label="Estimated — not confirmed" />
+            )}
           </div>
           <TrustSummary meta={trustMeta} />
           <h3 className="mt-4 text-2xl font-black">{trainNumberName(train)}</h3>
@@ -3219,6 +3222,7 @@ export function SplitJourneyCard({
             )}
             <DataBadge type="SPLIT ROUTE" label="1-Split (1 Transfer)" />
             <DataBadge type={legTrust.badgeType} label={legTrust.badgeLabel} />
+            {isEst && <DataBadge type="ESTIMATED" label="Estimated — not confirmed" />}
           </div>
             <h3 className="mt-3 text-xl font-black leading-tight">
               {rank != null && (
@@ -3380,6 +3384,7 @@ export function MultiSplitJourneyCard({
           <div className="flex flex-wrap gap-2">
             <DataBadge type="SPLIT ROUTE" label={`${legs.length - 1}-Split (${legs.length - 1} Transfers)`} />
             <DataBadge type={legTrust.badgeType} label={legTrust.badgeLabel} />
+            {isEst && <DataBadge type="ESTIMATED" label="Estimated — not confirmed" />}
           </div>
           <p className="mt-3 text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">{legTrust.text}</p>
           <h3 className="mt-3 text-2xl font-black">
