@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback, FormEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
@@ -98,22 +98,34 @@ import { BookingWorkspace } from "./BookingWorkspace";
 
 
 export function TrainResultsWorkspace() {
+  const searchParams = useSearchParams();
   const searchRequestId = useRef(0);
   const liveHydrationGeneration = useRef(0);
   const liveHydrationChain = useRef(Promise.resolve());
   const splitAutoCheckedRouteCount = useRef(0);
   const lastAutoSearchKey = useRef("");
   const queuedTargets = useRef<Set<string>>(new Set());
+
+  const rawFrom = searchParams?.get("from") || searchParams?.get("source") || "";
+  const rawTo = searchParams?.get("to") || searchParams?.get("destination") || "";
+  const initialSource = rawFrom ? resolveStationInput("", rawFrom) || rawFrom.toUpperCase() : DEFAULT_SOURCE_CODE;
+  const initialDestination = rawTo ? resolveStationInput("", rawTo) || rawTo.toUpperCase() : DEFAULT_DESTINATION_CODE;
+  const initialDate = searchParams?.get("date") || todayIso();
+  const initialClass = searchParams?.get("class") || searchParams?.get("classType") || "3A";
+  const initialQuota = (searchParams?.get("quota") || "GN").toUpperCase();
+  const rawVia = searchParams?.get("via") || searchParams?.get("preferredHub") || "";
+  const initialPreferredHub = rawVia ? resolveStationInput("", rawVia) || rawVia.toUpperCase() : DEFAULT_VIA_CODE;
+
   const [searchKey, setSearchKey] = useState("");
-  const [source, setSource] = useState(DEFAULT_SOURCE_CODE);
-  const [destination, setDestination] = useState(DEFAULT_DESTINATION_CODE);
-  const [preferredHub, setPreferredHub] = useState(DEFAULT_VIA_CODE);
-  const [sourceQuery, setSourceQuery] = useState(stationLabelFromCode(DEFAULT_SOURCE_CODE));
-  const [destinationQuery, setDestinationQuery] = useState(stationLabelFromCode(DEFAULT_DESTINATION_CODE));
-  const [preferredHubQuery, setPreferredHubQuery] = useState(stationLabelFromCode(DEFAULT_VIA_CODE));
-  const [date, setDate] = useState(todayIso());
-  const [classType, setClassType] = useState("3A");
-  const [quota, setQuota] = useState("GN");
+  const [source, setSource] = useState(initialSource);
+  const [destination, setDestination] = useState(initialDestination);
+  const [preferredHub, setPreferredHub] = useState(initialPreferredHub);
+  const [sourceQuery, setSourceQuery] = useState(stationCompactLabel(initialSource));
+  const [destinationQuery, setDestinationQuery] = useState(stationCompactLabel(initialDestination));
+  const [preferredHubQuery, setPreferredHubQuery] = useState(stationCompactLabel(initialPreferredHub));
+  const [date, setDate] = useState(initialDate);
+  const [classType, setClassType] = useState(initialClass);
+  const [quota, setQuota] = useState(initialQuota);
   const allowSplit = true;
   const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi">("all");
   const [sortBy, setSortBy] = useState<"best" | "cheapest" | "highestFare" | "fastest" | "lowestLayover" | "earliest" | "latest" | "availability">("best");
@@ -471,46 +483,35 @@ export function TrainResultsWorkspace() {
   }, []);
 
   useEffect(() => {
-    const effectiveSearchKey = searchKey || window.location.search;
-    if (!effectiveSearchKey || lastAutoSearchKey.current === effectiveSearchKey) return;
-    lastAutoSearchKey.current = effectiveSearchKey;
-    const params = new URLSearchParams(effectiveSearchKey);
-    const rawInitialSource = params.get("from") || params.get("source") || "";
-    const rawInitialDestination = params.get("to") || params.get("destination") || "";
-    const hasExplicitRoute = Boolean(rawInitialSource && rawInitialDestination);
-    const initialSource = rawInitialSource ? resolveStationInput("", rawInitialSource) || rawInitialSource.toUpperCase() : "";
-    const initialDestination = rawInitialDestination ? resolveStationInput("", rawInitialDestination) || rawInitialDestination.toUpperCase() : "";
-    const initialDate = params.get("date") || todayIso();
-    const initialClass = params.get("class") || params.get("classType") || "3A";
-    const initialQuota = (params.get("quota") || "GN").toUpperCase();
-    const rawInitialPreferredHub = params.get("via") || params.get("preferredHub") || "";
-    const initialPreferredHub = rawInitialPreferredHub ? resolveStationInput("", rawInitialPreferredHub) || rawInitialPreferredHub.toUpperCase() : "";
-    if (initialSource) {
-      setSource(initialSource);
-      setSourceQuery(stationCompactLabel(initialSource));
-    }
-    if (initialDestination) {
-      setDestination(initialDestination);
-      setDestinationQuery(stationCompactLabel(initialDestination));
-    }
-    if (initialPreferredHub) {
-      setPreferredHub(initialPreferredHub);
-      setPreferredHubQuery(stationCompactLabel(initialPreferredHub));
-    }
-    if (params.get("date")) {
-      setDate(initialDate);
-    }
-    if (params.get("class") || params.get("classType")) {
-      setClassType(initialClass);
-    }
-    if (params.get("quota")) {
-      setQuota(initialQuota);
-    }
-    if (hasExplicitRoute && initialSource && initialDestination) {
-      window.setTimeout(() => runSearch(undefined, { source: initialSource, destination: initialDestination, date: initialDate, classType: initialClass, quota: initialQuota, preferredHub: initialPreferredHub }), 80);
+    const rawInitialSource = searchParams?.get("from") || searchParams?.get("source") || "";
+    const rawInitialDestination = searchParams?.get("to") || searchParams?.get("destination") || "";
+    if (rawInitialSource && rawInitialDestination) {
+      const srcCode = resolveStationInput("", rawInitialSource) || rawInitialSource.toUpperCase();
+      const dstCode = resolveStationInput("", rawInitialDestination) || rawInitialDestination.toUpperCase();
+      const d = searchParams?.get("date") || todayIso();
+      const c = searchParams?.get("class") || searchParams?.get("classType") || "3A";
+      const q = (searchParams?.get("quota") || "GN").toUpperCase();
+      const rawHub = searchParams?.get("via") || searchParams?.get("preferredHub") || "";
+      const hubCode = rawHub ? resolveStationInput("", rawHub) || rawHub.toUpperCase() : "";
+
+      setSource(srcCode);
+      setSourceQuery(stationCompactLabel(srcCode));
+      setDestination(dstCode);
+      setDestinationQuery(stationCompactLabel(dstCode));
+      setDate(d);
+      setClassType(c);
+      setQuota(q);
+      if (hubCode) {
+        setPreferredHub(hubCode);
+        setPreferredHubQuery(stationCompactLabel(hubCode));
+      }
+
+      window.setTimeout(() => {
+        runSearch(undefined, { source: srcCode, destination: dstCode, date: d, classType: c, quota: q, preferredHub: hubCode });
+      }, 50);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchKey]);
+  }, [searchParams]);
 
   async function runSearch(event?: FormEvent, override?: { source: string; destination: string; date: string; classType: string; quota?: string; preferredHub?: string; fetchSplits?: boolean; pushUrl?: boolean }) {
     event?.preventDefault();

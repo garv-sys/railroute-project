@@ -106,20 +106,22 @@ export function RailRouteToolPage({ tool }: { tool: ToolKind }) {
   return (
     <ProductShell active={tool}>
       <ToolHeader tool={tool} />
-      {tool === "book" && <BookingWorkspace />}
-      {tool === "trains" && (
-        <>
-          <TrainResultsWorkspace />
-          <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6"><TrainSearchPanel compact /></section>
-        </>
-      )}
-      {tool === "train-search" && <section className="px-4 pb-16 sm:px-6"><TrainSearchPanel /></section>}
-      {tool === "live" && <section className="px-4 pb-16 sm:px-6"><LiveTool /></section>}
-      {tool === "pnr" && <section className="px-4 pb-16 sm:px-6"><PnrTool /></section>}
-      {tool === "fare" && <section className="px-4 pb-16 sm:px-6"><FareTool /></section>}
-      {tool === "route" && <section className="px-4 pb-16 sm:px-6"><TrainSearchPanel /></section>}
-      {tool === "coach" && <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6"><CoachExplorer /></section>}
-      {tool === "health" && <ProviderHealthDashboard />}
+      <React.Suspense fallback={<LoadingBlock label="Loading RailRoute workspace..." />}>
+        {tool === "book" && <BookingWorkspace />}
+        {tool === "trains" && (
+          <>
+            <TrainResultsWorkspace />
+            <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6"><TrainSearchPanel compact /></section>
+          </>
+        )}
+        {tool === "train-search" && <section className="px-4 pb-16 sm:px-6"><TrainSearchPanel /></section>}
+        {tool === "live" && <section className="px-4 pb-16 sm:px-6"><LiveTool /></section>}
+        {tool === "pnr" && <section className="px-4 pb-16 sm:px-6"><PnrTool /></section>}
+        {tool === "fare" && <section className="px-4 pb-16 sm:px-6"><FareTool /></section>}
+        {tool === "route" && <section className="px-4 pb-16 sm:px-6"><TrainSearchPanel /></section>}
+        {tool === "coach" && <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6"><CoachExplorer /></section>}
+        {tool === "health" && <ProviderHealthDashboard />}
+      </React.Suspense>
     </ProductShell>
   );
 }
