@@ -587,10 +587,10 @@ export function TrainResultsWorkspace() {
       let directCountForRequest = 0;
       let splitCountForRequest = 0;
 
-      const forwardDirectPromise = postJson<any>("/api/train-between", requestPayload)
+      const forwardDirectPromise = postJson<any>("/api/search-direct", requestPayload)
         .then((direct) => {
           if (requestId !== searchRequestId.current) return [];
-          const trains = direct.trains || [];
+          const trains = direct?.data?.trains || direct?.data?.directTrains || direct?.extra?.trains || direct?.extra?.directTrains || direct?.trains || direct?.directTrains || [];
           directCountForRequest += trains.length;
           setState((current) => ({ ...current, loading: false, trains, error: "" }));
           queueLiveHydration(
@@ -617,8 +617,8 @@ export function TrainResultsWorkspace() {
         mode: "full",
       })
         .then((split) => {
-          const splitRoutes = split?.splitRoutes || split?.data?.splitRoutes || [];
-          const multiSplitRoutes = split?.multiSplitRoutes || split?.data?.multiSplitRoutes || [];
+          const splitRoutes = split?.data?.splitRoutes || split?.extra?.splitRoutes || split?.splitRoutes || [];
+          const multiSplitRoutes = split?.data?.multiSplitRoutes || split?.extra?.multiSplitRoutes || split?.multiSplitRoutes || [];
           splitCountForRequest += splitRoutes.length + multiSplitRoutes.length;
           if (requestId !== searchRequestId.current) return;
           setState((current) => ({
