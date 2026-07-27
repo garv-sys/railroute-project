@@ -180,8 +180,6 @@ export function TrainResultsWorkspace() {
         const trainNo = String(train.trainNo || "").toLowerCase();
         if (!trainName.includes(query) && !trainNo.includes(query)) return false;
       }
-      // Only show trains that have confirmed fare + seat availability
-      if (!hasVerifiedFareAndSeat(train, selectedSortClass)) return false;
       // Confirmed seats only filter
       if (confirmedOnly) {
         const avail = String(train?.availability || "").toUpperCase();
@@ -224,11 +222,6 @@ export function TrainResultsWorkspace() {
     const fareLimit = Number(maxFare) || Infinity;
     const durationLimit = maxDuration ? Number(maxDuration) * 60 : Infinity;
     return dedupeSplitRoutes(state.splits).filter((split) => {
-      // Only keep splits that have verified fare and seat availability on both legs (no estimated/unverified rows)
-      if (!splitHasVerifiedFareAndSeats(split, selectedSortClass)) {
-        return false;
-      }
-
       // 2. "Not bookable on this date" for selected class on either leg -> remove entire split card
       const isNotBookableLeg = (leg: any) => {
         const code = resolveClassCode(leg, selectedSortClass || "");
@@ -325,11 +318,6 @@ export function TrainResultsWorkspace() {
     return state.multiSplits.filter((split) => {
       const legs: any[] = split.legs || [];
       if (legs.length === 0) return false;
-
-      // Only show multi-split routes where ALL legs are verified (no estimated/unverified rows)
-      if (!multiSplitHasVerifiedFareAndSeats(split, selectedSortClass || "")) {
-        return false;
-      }
 
       // Filter out multi-splits where any leg is explicitly unbookable
       const isLegUnbookable = (leg: any) => {
