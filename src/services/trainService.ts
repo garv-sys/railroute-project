@@ -2676,46 +2676,54 @@ function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15, directT
     list.sort((a, b) => (b.score || 0) - (a.score || 0));
   }
 
+  // 3. Dynamically pick top 5 distinct hub clusters by best candidate score
+  const clusterRankings = Array.from(routesByCluster.entries()).map(([cluster, list]) => ({
+    cluster,
+    bestScore: list[0]?.score || 0,
+    list,
+  }));
+  clusterRankings.sort((a, b) => b.bestScore - a.bestScore);
+  const topClusters = clusterRankings.slice(0, 5).map((c) => c.cluster);
+
   const selected: SplitRouteResult[] = [];
   const selectedKeys = new Set<string>();
   const stationCounts = new Map<string, number>();
   const clusterCounts = new Map<string, number>();
   const trainCounts = new Map<string, number>();
 
-  const maxPerStation = 2;
-  const maxPerCluster = 3;
-  const maxPerTrain = 3;
-
-  // Round-robin selection across distinct hub clusters
+  // Pass 1: Soft target distribution (~3 results per top-5 hub cluster)
+  const targetPerCluster = 3;
   let addedInPass = true;
-  let pass = 0;
-  while (selected.length < limit && addedInPass && pass < 5) {
+  let round = 0;
+
+  while (selected.length < limit && addedInPass && round < targetPerCluster) {
     addedInPass = false;
-    for (const [cluster, list] of routesByCluster.entries()) {
+    for (const cluster of topClusters) {
       if (selected.length >= limit) break;
-      const clusterCount = clusterCounts.get(cluster) || 0;
-      if (clusterCount >= maxPerCluster) continue;
+      const list = routesByCluster.get(cluster) || [];
+      const currentClusterCount = clusterCounts.get(cluster) || 0;
+      if (currentClusterCount >= targetPerCluster) continue;
 
       const cand = list.find((r) => {
-        const key = `${cleanTrainNo(r.leg1?.trainNo)}_${r.hubStation}_${cleanTrainNo(r.leg2?.trainNo)}`;
+        const t1 = cleanTrainNo(r.leg1?.trainNo);
+        const t2 = cleanTrainNo(r.leg2?.trainNo);
+        const key = `${t1}_${r.hubStation}_${t2}`;
         if (selectedKeys.has(key)) return false;
 
         const stCount = stationCounts.get(r.hubStation) || 0;
-        if (stCount >= maxPerStation) return false;
+        if (stCount >= 2) return false;
 
-        const t1 = cleanTrainNo(r.leg1?.trainNo);
-        const t2 = cleanTrainNo(r.leg2?.trainNo);
         const t1Count = trainCounts.get(t1) || 0;
         const t2Count = trainCounts.get(t2) || 0;
-        if (t1Count >= maxPerTrain || t2Count >= maxPerTrain) return false;
+        if (t1Count >= 3 || t2Count >= 3) return false;
 
         return true;
       });
 
       if (cand) {
-        const key = `${cleanTrainNo(cand.leg1?.trainNo)}_${cand.hubStation}_${cleanTrainNo(cand.leg2?.trainNo)}`;
         const t1 = cleanTrainNo(cand.leg1?.trainNo);
         const t2 = cleanTrainNo(cand.leg2?.trainNo);
+        const key = `${t1}_${cand.hubStation}_${t2}`;
 
         selected.push(cand);
         selectedKeys.add(key);
@@ -2726,7 +2734,45 @@ function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15, directT
         addedInPass = true;
       }
     }
-    pass++;
+    round++;
+  }
+
+  // Pass 2: Spillover to reach 15 if some top hub clusters had fewer than 3 options
+  if (selected.length < limit) {
+    let spilloverAdded = true;
+    let spilloverRound = 0;
+    while (selected.length < limit && spilloverAdded && spilloverRound < 5) {
+      spilloverAdded = false;
+      for (const cluster of topClusters) {
+        if (selected.length >= limit) break;
+        const list = routesByCluster.get(cluster) || [];
+        const currentClusterCount = clusterCounts.get(cluster) || 0;
+        if (currentClusterCount >= 5) continue; // max 5 per cluster in spillover
+
+        const cand = list.find((r) => {
+          const t1 = cleanTrainNo(r.leg1?.trainNo);
+          const t2 = cleanTrainNo(r.leg2?.trainNo);
+          const key = `${t1}_${r.hubStation}_${t2}`;
+          if (selectedKeys.has(key)) return false;
+          return true;
+        });
+
+        if (cand) {
+          const t1 = cleanTrainNo(cand.leg1?.trainNo);
+          const t2 = cleanTrainNo(cand.leg2?.trainNo);
+          const key = `${t1}_${cand.hubStation}_${t2}`;
+
+          selected.push(cand);
+          selectedKeys.add(key);
+          stationCounts.set(cand.hubStation, (stationCounts.get(cand.hubStation) || 0) + 1);
+          clusterCounts.set(cluster, (clusterCounts.get(cluster) || 0) + 1);
+          trainCounts.set(t1, (trainCounts.get(t1) || 0) + 1);
+          trainCounts.set(t2, (trainCounts.get(t2) || 0) + 1);
+          spilloverAdded = true;
+        }
+      }
+      spilloverRound++;
+    }
   }
 
   // Sort final selected list by composite score (highest first)
