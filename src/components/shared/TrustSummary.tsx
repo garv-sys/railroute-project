@@ -1202,11 +1202,11 @@ export function requestedDestinationStation(train: any, fallback = "") {
 }
 
 export function actualLegSourceStation(train: any) {
-  return String(train?.availabilitySourceStation || train?.source || train?.trainSource || "").toUpperCase();
+  return String(train?.source || train?.requestedSource || train?.trainSource || "").toUpperCase();
 }
 
 export function actualLegDestinationStation(train: any) {
-  return String(train?.availabilityDestinationStation || train?.destination || train?.trainDestination || "").toUpperCase();
+  return String(train?.destination || train?.requestedDestination || train?.trainDestination || "").toUpperCase();
 }
 
 export function legUsesAlternateTerminal(train: any, fallbackSource = "", fallbackDestination = "") {
@@ -1259,6 +1259,7 @@ export function splitRouteStableKey(split: any) {
   return [
     leg1.trainNo,
     leg1.departureDate || leg1.journeyDate,
+    split.hubStation,
     leg2.trainNo,
     leg2.departureDate || leg2.journeyDate,
   ].map((value) => String(value || "").toUpperCase()).join("|");
