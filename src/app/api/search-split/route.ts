@@ -1,4 +1,5 @@
 import { findMultiSplitRoutes, findSmartRoutes, enrichWithLiveAvailability, getFallbackMockFare, SPLIT_HUB_CORRIDORS } from '@/services/trainService';
+import { validateBookingDate } from '@/lib/date-validation';
 import { buildTrustMeta } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
@@ -45,13 +46,9 @@ export async function POST(request: Request) {
       return validationFailure('Missing required parameters', requestId);
     }
 
-    const MAX_BOOKING_DAYS = 60;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const selectedDate = new Date(date);
-    const daysFromToday = Math.round((selectedDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    if (daysFromToday < -2 || daysFromToday > MAX_BOOKING_DAYS + 2) {
-      return validationFailure('Booking window is 60 days. Please select an earlier date.', requestId);
+    const dateValidation = validateBookingDate(date);
+    if (!dateValidation.valid) {
+      return validationFailure(dateValidation.error || 'Invalid date', requestId);
     }
 
     const coverageMode = (mode === 'full' ? 'full' : 'quick') as 'quick' | 'full';

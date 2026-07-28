@@ -1276,6 +1276,14 @@ export function TrainResultsWorkspace() {
 
           {/* Emergency travel panel removed per request */}
 	      <div className="mt-6 space-y-4">
+        {state.error && (
+          <div className="rounded-[28px] border border-amber-300 bg-amber-50/90 p-6 text-amber-900 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            <h3 className="text-xl font-black">
+              {state.error.includes("60-day") ? "Date Outside 60-Day Advance Booking Window" : "Notice"}
+            </h3>
+            <p className="mt-2 text-sm font-semibold leading-6">{state.error}</p>
+          </div>
+        )}
         {(resultMode === "all" || resultMode === "direct") && (() => {
           const validDirectTrains = visibleTrains.slice(0, 15);
           return (

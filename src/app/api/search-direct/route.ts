@@ -3,6 +3,8 @@ import { trustMetaForTrainList } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
 import { getClientIp, isRateLimited } from '@/lib/rate-limiter';
 
+import { validateBookingDate } from '@/lib/date-validation';
+
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
@@ -24,6 +26,11 @@ export async function POST(request: Request) {
 
     if (!source || !destination || !date) {
       return validationFailure('Missing required parameters', requestId);
+    }
+
+    const dateValidation = validateBookingDate(date);
+    if (!dateValidation.valid) {
+      return validationFailure(dateValidation.error || 'Invalid date', requestId);
     }
 
     const candidateTrains = await checkDirectTrains(source, destination, date, classType, { debug: Boolean(debug) }, quota);

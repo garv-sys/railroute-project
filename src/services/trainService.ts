@@ -3,6 +3,7 @@ import MAJOR_HUBS from '@/data/major_hubs.json';
 import MAJOR_TRAIN_ROUTES from '@/data/major_train_routes.json';
 import { buildTrustMeta } from '@/lib/confidence';
 import { STATION_COORDS } from '@/lib/railway-intelligence';
+import { validateBookingDate } from '@/lib/date-validation';
 import ALL_STATIONS_RAW from '@/data/all_stations.json';
 // Build a code→coord map from all_stations.json for small-station coordinate lookups
 const ALL_STATION_COORD_MAP: Record<string, { lat: number; lon: number }> = {};
@@ -2948,7 +2949,28 @@ function trainSupportsClass(t: any, targetClass: string): boolean {
   return true;
 }
 
+const hubCandidateCache = new Map<string, { timestamp: number; hubs: string[] }>();
+
+function getCachedHubCandidates(source: string, dest: string, preferredHub = ''): string[] {
+  const cacheKey = `${source}_${dest}_${preferredHub}`;
+  const cached = hubCandidateCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && now - cached.timestamp < 5 * 60 * 1000) {
+    return cached.hubs;
+  }
+  const rawHubs = dynamicSplitHubCandidates(source, dest, preferredHub, 100);
+  const hubs = rawHubs.filter((h) => h !== source && h !== dest);
+  hubCandidateCache.set(cacheKey, { timestamp: now, hubs });
+  return hubs;
+}
+
 export async function findSmartRoutesForDate(source: string, dest: string, date: string, classType: string = 'Any', directTrains: any[] = [], preferredHubInput: string = '', options: TrainSearchOptions = {}, quota: string = 'GN'): Promise<SplitRouteResult[]> {
+  const dateValidation = validateBookingDate(date);
+  if (!dateValidation.valid) {
+    console.log(`[findSmartRoutesForDate] Validation failed: ${dateValidation.error}`);
+    return [];
+  }
+
   const startTime = Date.now();
   const timeout = options.globalTimeoutMs || 15000;
   source = normalizeStationCode(source);
@@ -2956,70 +2978,96 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   const formattedDate = formatDateStr(date);
   console.log(`[TRACER] [findSmartRoutesForDate] 1. Journey Request: source=${source}, destination=${dest}, date=${formattedDate}, timeout=${timeout}ms`);
 
-  // Dynamically generate candidate hubs using dynamicSplitHubCandidates (no hardcoded fixed list)
-  // Use 100 hubs to maximize chance of finding 15 verified routes
-  const rawHubs = dynamicSplitHubCandidates(source, dest, preferredHubInput, 100);
-  const hubs = rawHubs.filter(h => h !== source && h !== dest);
-  console.log(`[TRACER] [findSmartRoutesForDate] 2. Hub Generation: Total candidates discovered: ${rawHubs.length}. Filtered hubs: ${hubs.join(', ')}`);
+  const rawHubs = getCachedHubCandidates(source, dest, preferredHubInput);
+  
+  // Prune hubs to top 5 distinct hub clusters upfront
+  const hubsByCluster = new Map<string, string[]>();
+  for (const h of rawHubs) {
+    const cluster = splitHubCorridor(h);
+    if (!hubsByCluster.has(cluster)) hubsByCluster.set(cluster, []);
+    hubsByCluster.get(cluster)!.push(h);
+  }
+  const topClusters = Array.from(hubsByCluster.keys()).slice(0, 5);
+  const hubs: string[] = [];
+  for (const cluster of topClusters) {
+    const list = hubsByCluster.get(cluster) || [];
+    hubs.push(...list.slice(0, 2)); // take max 2 station codes per top-5 cluster
+  }
+
+  console.log(`[TRACER] [findSmartRoutesForDate] 2. Top-5 Hub Clusters: ${topClusters.join(', ')}. Selected hubs (${hubs.length}): ${hubs.join(', ')}`);
 
   const legOpts: TrainSearchOptions = { ...options, fetchLive: false, providerPairLimit: 2, maxSplitCandidates: 100 };
   const allRoutes: any[] = [];
   const seen = new Set<string>();
-  // Cross-hub Leg-1 train cap: prevents one dominant train from monopolizing many hubs, but relaxed to allow enough combinations on thin routes.
   const globalT1Contrib = new Map<string, number>();
   const GLOBAL_T1_CAP = 15;
 
-  // Parallelize the hub exploration loop to avoid sequential network delays and allow more live candidates.
-  await Promise.all(hubs.slice(0, 20).map(async (hub) => {
-    if (Date.now() - startTime > timeout - 3000) {
-      console.log(`[TRACER] [findSmartRoutesForDate] Validation: Timeout exceeded during hub search.`);
-      return;
-    }
-    try {
-      const hubIndex = hubs.indexOf(hub);
-      // Always fetch live trains for the first 6 hubs to ensure fresh, accurate schedules on major routes.
-      const useLive = hubIndex < 6;
-      let l1: any[] = [];
-      let l2: any[] = [];
+  // Process hubs concurrently in small batches to stay within rate limits and socket bounds
+  const batchSize = 3;
+  for (let i = 0; i < hubs.length; i += batchSize) {
+    if (Date.now() - startTime > timeout - 2000) break;
+    const batch = hubs.slice(i, i + batchSize);
 
-      if (useLive) {
-        console.log(`[split-live] Always fetching live trains for hub ${hub} (${source}->${hub} and ${hub}->${dest})...`);
-        const [r1, r2] = await Promise.all([
-          searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true }),
-          searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true }),
-        ]);
-        l1 = r1;
-        l2 = r2;
-      } else {
-        l1 = await searchTrainsSmart(source, hub, formattedDate, legOpts);
-        l2 = await searchTrainsSmart(hub, dest, formattedDate, legOpts);
+    await Promise.all(batch.map(async (hub) => {
+      try {
+        const hubIndex = hubs.indexOf(hub);
+        const useLive = hubIndex < 5;
+        let l1: any[] = [];
+        let l2: any[] = [];
 
-        // Always try live fallback for any hub where local search returns 0 results.
-        // This ensures stations with no local data (AWR, UDZ, BHL etc.) still get coverage.
-        if (l1.length === 0) {
-          console.log(`[split-hybrid] Local search returned 0 for ${source}->${hub}, running live fallback...`);
-          l1 = await searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true });
+        if (useLive) {
+          console.log(`[split-live] Fetching live trains for hub ${hub} (${source}->${hub} and ${hub}->${dest})...`);
+          const [r1, r2] = await Promise.all([
+            searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true }).catch(err => {
+              console.error(`[split-search] Leg 1 (${source}->${hub}) failed:`, err?.message || err);
+              return [];
+            }),
+            searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true }).catch(err => {
+              console.error(`[split-search] Leg 2 (${hub}->${dest}) failed:`, err?.message || err);
+              return [];
+            }),
+          ]);
+          l1 = r1;
+          l2 = r2;
+        } else {
+          try {
+            l1 = await searchTrainsSmart(source, hub, formattedDate, legOpts);
+          } catch (err) {
+            console.error(`[split-search] Local leg 1 (${source}->${hub}) failed:`, err);
+          }
+          try {
+            l2 = await searchTrainsSmart(hub, dest, formattedDate, legOpts);
+          } catch (err) {
+            console.error(`[split-search] Local leg 2 (${hub}->${dest}) failed:`, err);
+          }
+
+          if (l1.length === 0) {
+            try {
+              l1 = await searchTrainsSmart(source, hub, formattedDate, { ...legOpts, fetchLive: true });
+            } catch (err) {
+              console.error(`[split-hybrid] Live fallback leg 1 (${source}->${hub}) failed:`, err);
+            }
+          }
+          if (l2.length === 0) {
+            try {
+              l2 = await searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true });
+            } catch (err) {
+              console.error(`[split-hybrid] Live fallback leg 2 (${hub}->${dest}) failed:`, err);
+            }
+          }
         }
-        if (l2.length === 0) {
-          console.log(`[split-hybrid] Local search returned 0 for ${hub}->${dest}, running live fallback...`);
-          l2 = await searchTrainsSmart(hub, dest, formattedDate, { ...legOpts, fetchLive: true });
+
+        l1 = l1.filter((t: any) => trainRunsOnRailDate(t.running_days || t.runsOn || '1111111', formattedDate));
+        const nextDayDate = addDaysToRailDate(formattedDate, 1);
+        l2 = l2.filter((t: any) => {
+          const runsSameDay = trainRunsOnRailDate(t.running_days || t.runsOn || '1111111', formattedDate);
+          const runsNextDay = trainRunsOnRailDate(t.running_days || t.runsOn || '1111111', nextDayDate);
+          return runsSameDay || runsNextDay;
+        });
+
+        if (l1.length === 0 || l2.length === 0) {
+          return;
         }
-      }
-
-      // Always filter by running day — IRCTC won't return data for trains that don't run on the date
-      l1 = l1.filter((t: any) => trainRunsOnRailDate(t.running_days || t.runsOn || '1111111', formattedDate));
-      // Leg 2 may depart on next day after overnight Leg 1 arrival; allow same day OR next day trains
-      const nextDayDate = addDaysToRailDate(formattedDate, 1);
-      l2 = l2.filter((t: any) => {
-        const runsSameDay = trainRunsOnRailDate(t.running_days || t.runsOn || '1111111', formattedDate);
-        const runsNextDay = trainRunsOnRailDate(t.running_days || t.runsOn || '1111111', nextDayDate);
-        return runsSameDay || runsNextDay;
-      });
-
-      if (l1.length === 0 || l2.length === 0) {
-        console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected hub "${hub}" - no trains running on date after day-of-week filter.`);
-        return;
-      }
 
       const cleanClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
       let filteredL1 = l1;
@@ -3092,6 +3140,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       console.warn(`[split] hub ${hub} failed:`, e);
     }
   }));
+  }
   console.log(`[TRACER] [findSmartRoutesForDate] 3. Split Route Candidates generated count: ${allRoutes.length}`);
 
   // Interleave routes by hub so each hub gets fair enrichment slots (round-robin)
