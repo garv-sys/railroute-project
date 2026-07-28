@@ -3039,7 +3039,8 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
   source = normalizeStationCode(source);
   dest = normalizeStationCode(dest);
   const formattedDate = formatDateStr(date);
-  console.log(`[TRACER] [findSmartRoutesForDate] 1. Journey Request: source=${source}, destination=${dest}, date=${formattedDate}, timeout=${timeout}ms`);
+  const directTrainNos = new Set((directTrains || []).map((t: any) => cleanTrainNo(t.trainNo || t.train_no)).filter(Boolean));
+  console.log(`[TRACER] [findSmartRoutesForDate] 1. Journey Request: source=${source}, destination=${dest}, date=${formattedDate}, directTrains=${directTrainNos.size}, timeout=${timeout}ms`);
 
   const rawHubs = getCachedHubCandidates(source, dest, preferredHubInput);
   
@@ -3165,6 +3166,11 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
           const tn2 = cleanTrainNo(t2.trainNo || t2.train_no);
           if (tn1 && tn2 && tn1 === tn2) {
             console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route SAME train: ${tn1}`);
+            continue;
+          }
+
+          if (directTrainNos.has(tn1) || directTrainNos.has(tn2)) {
+            console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected direct train in split leg: tn1=${tn1}, tn2=${tn2}`);
             continue;
           }
 
@@ -3331,7 +3337,6 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - enrichment exception:`, e);
     }
   }
-  const directTrainNos = new Set((directTrains || []).map((t: any) => String(t.trainNo || t.train_no || '').trim().replace(/\D/g, '')).filter(Boolean));
   const diverseResults = selectDiverseHubRoutes(results, 50, directTrainNos);
   console.log(`[TRACER] [findSmartRoutesForDate] 5. Enrichment Finished: successfully enriched count=${diverseResults.length}`);
   return diverseResults;
