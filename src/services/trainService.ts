@@ -1320,8 +1320,12 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     if (!coord) return 999999;
     const hubObj = MAJOR_HUB_BY_CODE.get(code) || { code, lat: coord.lat, lon: coord.lon };
     let score = dynamicHubScore(sourceCoord, destCoord, hubObj as MajorHub);
-    if (USER_PRIORITY_HUBS.has(code)) {
-      score -= 500;
+    
+    // Penalize out-of-way detours (e.g. going far north to NDLS for a west journey)
+    const totalDist = haversineKm(sourceCoord, coord) + haversineKm(coord, destCoord);
+    const detourRatio = totalDist / directDistance;
+    if (detourRatio > 1.25) {
+      score += (detourRatio - 1.25) * 800;
     }
     return score;
   };
