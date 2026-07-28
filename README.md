@@ -2,7 +2,7 @@
 
 # 🚆 RailRoute
 
-### Smart Indian Railways Journey Planner — Split Routes, Direct Trains & Real-Time Availability
+### Smart Indian Railways Journey Planner — Split Routes, Direct Trains & Real-Time Live Availability
 
 **RailRoute** is a production-ready, full-stack Indian Railways travel planner. It solves the critical problem where no direct trains have available seats between two stations by discovering, enriching, and ranking **optimal 2-leg and multi-leg split routes** via intermediate hubs — with live provider availability and clear data confidence badging.
 
