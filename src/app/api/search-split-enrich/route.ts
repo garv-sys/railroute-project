@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       return validationFailure('Missing required parameter: date', requestId);
     }
 
-    const MAX_BOOKING_DAYS = 60;
+    const MAX_BOOKING_DAYS = 62;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const selectedDate = new Date(date);
