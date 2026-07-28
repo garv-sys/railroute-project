@@ -1770,6 +1770,13 @@ function renderAvailabilityRow(
       }
     }
     const statusUpper = statusText ? statusText.toUpperCase() : "";
+    if (/NOT_RETURNED|NO DATA|UNAVAILABLE|ERROR|FAIL|NOT CHECKED|CHECK SEATS|UNCONFIRMED/i.test(statusUpper)) {
+      return {
+        style: "bg-amber-500/15 text-amber-800 dark:text-amber-200 border border-amber-300/30",
+        text: `${classCode} · Unconfirmed`,
+        isCheckingCurrently
+      };
+    }
     if (/\bAVAILABLE\b|\bAVL\b|CNF|CONFIRM/.test(statusUpper)) {
       return {
         style: "bg-green-500/15 text-green-700 dark:text-green-300",

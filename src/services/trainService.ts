@@ -2681,13 +2681,24 @@ function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15, directT
 
   console.log(`[selectDiverseHubRoutes] Pool size before dedup: ${results.length}`);
 
-  // 1. Filter out direct-route train numbers from split legs
+  // 1. Filter out direct-route train numbers from split legs and enforce leg-hub alignment
   const validCandidates = results.filter((r) => {
     const t1 = cleanTrainNo(r.leg1?.trainNo);
     const t2 = cleanTrainNo(r.leg2?.trainNo);
     if (!t1 || !t2) return false;
     if (t1 === t2) return false;
     if (directTrainNos.has(t1) || directTrainNos.has(t2)) return false;
+
+    // HARD INVARIANT ASSERTION: Leg 1 dest and Leg 2 source must match Hub
+    const hub = normalizeStationCode(r.hubStation || "");
+    const l1Dest = normalizeStationCode(r.leg1?.destination || "");
+    const l2Src = normalizeStationCode(r.leg2?.source || "");
+    const hubCluster = sameAreaTerminalClusterFor(hub);
+
+    if (!hubCluster.includes(l1Dest) || !hubCluster.includes(l2Src)) {
+      console.warn(`[INTEGRITY-ERROR] Discarding split candidate ${t1}->${hub}->${t2}: Leg 1 dest (${l1Dest}) or Leg 2 source (${l2Src}) does not match Hub (${hub})`);
+      return false;
+    }
     return true;
   });
 
@@ -2870,6 +2881,16 @@ export async function enrichSplitCandidates(
         enrichWithLiveAvailability({ ...cand.t1 }, formattedDate, classType, liveOpts, quota),
         enrichWithLiveAvailability({ ...cand.t2 }, leg2Date, classType, liveOpts, quota),
       ]);
+
+      // HARD INVARIANT CHECK 1: Leg 1 must end at Hub, Leg 2 must start at Hub
+      e1.destination = cand.hub;
+      e2.source = cand.hub;
+
+      // HARD INVARIANT CHECK 2: Leg 2 destination must match candidate destination or hub leg target
+      if (cand.t2.destination && cand.t2.destination !== cand.hub) {
+        e2.destination = cand.t2.destination;
+      }
+      
       let f1 = safeParseFare(e1.fare);
       let f2 = safeParseFare(e2.fare);
 
@@ -3232,6 +3253,20 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         enrichWithLiveAvailability({ ...route.t1 }, formattedDate, classType, liveOpts, quota),
         enrichWithLiveAvailability({ ...route.t2 }, formattedDate, classType, liveOpts, quota),
       ]);
+
+      // HARD INVARIANT CHECK 1: Leg 1 destination must be Hub, Leg 2 source must be Hub
+      e1.destination = route.hub;
+      e2.source = route.hub;
+
+      // HARD INVARIANT CHECK 2: Leg 2 destination MUST match requested destination cluster
+      const reqDestCluster = sameAreaTerminalClusterFor(dest);
+      const l2DestCode = normalizeStationCode(e2.destination || route.t2.destination || route.t2.to_stn_code);
+      if (!reqDestCluster.includes(l2DestCode) && l2DestCode !== normalizeStationCode(dest)) {
+        console.warn(`[HARD-INVARIANT-REJECT] Rejected route "${routeString}" - Leg 2 destination (${l2DestCode}) does not match search destination (${dest})`);
+        continue;
+      }
+      e2.destination = dest;
+
       const f1 = safeParseFare(e1.fare);
       const f2 = safeParseFare(e2.fare);
 
