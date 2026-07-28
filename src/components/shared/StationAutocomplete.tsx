@@ -608,7 +608,7 @@ export function BestOptionsPanel({
     })(),
     seat: cleanClass ? classAvailabilityText(train, cleanClass) : compactSeatText(train),
   }));
-  const splitOptions = splitRoutes.filter((split) => splitHasVerifiedFareAndSeats(split, cleanClass)).map((split) => ({
+  const splitOptions = splitRoutes.map((split) => ({
     kind: "split" as const,
     label: splitOptionLabel(split),
     route: `${stationCompactLabel(actualLegSourceStation(split?.leg1) || split?.leg1?.source)} → ${stationCompactLabel(split?.hubStation)} → ${stationCompactLabel(actualLegDestinationStation(split?.leg2) || split?.leg2?.destination)}`,
@@ -692,7 +692,7 @@ export function EmergencyTravelPanel({
       score: directEmergencyRankScore(train, code),
     };
   });
-  const splitOptions = splitRoutes.filter((split) => splitHasVerifiedFareAndSeats(split, cleanClass)).map((split) => {
+  const splitOptions = splitRoutes.map((split) => {
     const leg1Seat = optionAvailabilitySummary(split?.leg1, cleanClass);
     const leg2Seat = optionAvailabilitySummary(split?.leg2, cleanClass);
     const layover = splitLayoverMinutes(split);
