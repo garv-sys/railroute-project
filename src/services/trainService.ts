@@ -3043,21 +3043,25 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
 
   const rawHubs = getCachedHubCandidates(source, dest, preferredHubInput);
   
-  // Prune hubs to top 5 distinct hub clusters upfront
+  // Adaptive Hub Selection:
+  // For rich corridors (many junctions), explore up to 8 top hub clusters (up to 16 stations).
+  // For sparse corridors, explore whatever clusters naturally exist.
   const hubsByCluster = new Map<string, string[]>();
   for (const h of rawHubs) {
     const cluster = splitHubCorridor(h);
     if (!hubsByCluster.has(cluster)) hubsByCluster.set(cluster, []);
     hubsByCluster.get(cluster)!.push(h);
   }
-  const topClusters = Array.from(hubsByCluster.keys()).slice(0, 5);
+  const availableClusters = Array.from(hubsByCluster.keys());
+  const maxClustersToExplore = Math.min(availableClusters.length, 8);
+  const topClusters = availableClusters.slice(0, maxClustersToExplore);
   const hubs: string[] = [];
   for (const cluster of topClusters) {
     const list = hubsByCluster.get(cluster) || [];
-    hubs.push(...list.slice(0, 2)); // take max 2 station codes per top-5 cluster
+    hubs.push(...list.slice(0, 2)); // take max 2 station codes per cluster
   }
 
-  console.log(`[TRACER] [findSmartRoutesForDate] 2. Top-5 Hub Clusters: ${topClusters.join(', ')}. Selected hubs (${hubs.length}): ${hubs.join(', ')}`);
+  console.log(`[TRACER] [findSmartRoutesForDate] Adaptive Hub Discovery: Corridor richness = ${availableClusters.length} clusters. Exploring ${topClusters.length} clusters (${hubs.length} hub stations): ${hubs.join(', ')}`);
 
   const legOpts: TrainSearchOptions = { ...options, fetchLive: false, providerPairLimit: 2, maxSplitCandidates: 100 };
   const allRoutes: any[] = [];

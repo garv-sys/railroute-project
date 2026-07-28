@@ -120,13 +120,26 @@ export async function POST(request: Request) {
     const getDiverseSplitRoutes = (routes: any[], limit = 40) => {
       console.log(`[getDiverseSplitRoutes] Pool size before dedup: ${routes.length}`);
 
-      // 1. Exclude direct train numbers from split legs
+      // 1. Exclude direct train numbers from split legs and enforce leg-hub alignment
       const validCandidates = routes.filter((r) => {
         const t1 = cleanTrain(r.leg1?.trainNo);
         const t2 = cleanTrain(r.leg2?.trainNo);
         if (!t1 || !t2) return false;
         if (t1 === t2) return false;
         if (directTrainNos.has(t1) || directTrainNos.has(t2)) return false;
+
+        const hub = String(r.hubStation || "").toUpperCase().trim();
+        const l1Dest = String(r.leg1?.destination || "").toUpperCase().trim();
+        const l2Src = String(r.leg2?.source || "").toUpperCase().trim();
+
+        if (l1Dest && hub && l1Dest !== hub) {
+          console.warn(`[INTEGRITY-REJECT] Discarding split route ${t1}->${hub}->${t2}: Leg 1 dest (${l1Dest}) != Hub (${hub})`);
+          return false;
+        }
+        if (l2Src && hub && l2Src !== hub) {
+          console.warn(`[INTEGRITY-REJECT] Discarding split route ${t1}->${hub}->${t2}: Leg 2 src (${l2Src}) != Hub (${hub})`);
+          return false;
+        }
         return true;
       });
 
