@@ -1327,6 +1327,7 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
   };
 
   filteredCandidates.sort((a, b) => getHubScore(a) - getHubScore(b));
+  console.log(`[HUB-DEBUG] Scored hub candidates for ${normalizedSource} → ${normalizedDest}:`, filteredCandidates.slice(0, 15).map(c => `${c} (${getHubScore(c).toFixed(0)})`).join(', '));
 
   return takeForCoverage(filteredCandidates, limit);
 }

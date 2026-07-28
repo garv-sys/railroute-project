@@ -7,6 +7,7 @@ import {
   liveAtStation,
   getTrainInfo,
 } from 'irctc-connect';
+import { searchTrainBetweenStationsRailKit, getAvailabilityRailKit } from './railkitService';
 import { ProviderCache } from '@/lib/provider-cache';
 import { getProviderUsageStats, trackProviderCall } from '@/lib/provider-usage';
 
@@ -297,12 +298,33 @@ export async function searchDirectTrains(fromStn: string, toStn: string, date?: 
       }
 
       if (!primaryList.length || primary?.success === false) {
-        console.warn('[irctc-connect] TrainBetween provider returned empty/non-success response', {
+        console.warn('[irctc-connect] TrainBetween provider returned empty/non-success response, trying RailKit...', {
           fromStn,
           toStn,
           dateStr,
-          response: compactProviderPayload(primary),
         });
+        const rkList = await searchTrainBetweenStationsRailKit(fromStn, toStn, dateStr);
+        if (rkList.length > 0) {
+          console.log(`[RailKit] Found ${rkList.length} live trains for ${fromStn}->${toStn} on ${dateStr}`);
+          return {
+            success: true,
+            provider: 'RailKit',
+            data: rkList.map((t) => ({
+              train_no: t.trainNo,
+              train_name: t.trainName,
+              from_stn_code: t.source,
+              to_stn_code: t.destination,
+              from_time: t.departureTime,
+              to_time: t.arrivalTime,
+              duration: t.duration,
+              running_days: t.runningDays,
+              train_src: t.source,
+              train_dstn: t.destination,
+              runsOn: t.runningDays,
+            })),
+            isNoTrainsResponse: false,
+          };
+        }
       }
       return {
         ...(primary && typeof primary === 'object' && !Array.isArray(primary) ? primary : {}),
@@ -312,13 +334,34 @@ export async function searchDirectTrains(fromStn: string, toStn: string, date?: 
         isNoTrainsResponse,
       };
     } catch (primaryError: any) {
-      console.warn('[irctc-connect] TrainBetween primary failed', {
+      console.warn('[irctc-connect] TrainBetween primary failed, running RailKit fallback', {
         fromStn,
         toStn,
         dateStr,
         error: primaryError?.message || primaryError,
       });
-      // Never return fake trains — return empty so only real data shows
+      const rkList = await searchTrainBetweenStationsRailKit(fromStn, toStn, dateStr);
+      if (rkList.length > 0) {
+        console.log(`[RailKit Fallback] Found ${rkList.length} live trains for ${fromStn}->${toStn} on ${dateStr}`);
+        return {
+          success: true,
+          provider: 'RailKit',
+          data: rkList.map((t) => ({
+            train_no: t.trainNo,
+            train_name: t.trainName,
+            from_stn_code: t.source,
+            to_stn_code: t.destination,
+            from_time: t.departureTime,
+            to_time: t.arrivalTime,
+            duration: t.duration,
+            running_days: t.runningDays,
+            train_src: t.source,
+            train_dstn: t.destination,
+            runsOn: t.runningDays,
+          })),
+          isNoTrainsResponse: false,
+        };
+      }
       return {
         success: false,
         provider: 'irctc-connect',
@@ -411,7 +454,23 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
         provider: response?.provider || 'irctc-connect',
       };
     } catch (err: any) {
-      console.error(`[IRCTC-LEG-ERROR] Exception thrown during seat availability lookup for Train ${trainNo} (${fromStn}->${toStn}) on ${dateStr} [Class: ${normalizedClass}, Quota: ${quota}]:`, err);
+      console.warn(`[IRCTC-LEG-ERROR] irctc-connect failed for Train ${trainNo}, running RailKit fallback:`, err?.message || err);
+      const rkRes = await getAvailabilityRailKit(trainNo, fromStn, toStn, dateStr, normalizedClass, quota);
+      if (rkRes && rkRes.availabilityStatus) {
+        console.log(`[RailKit Availability] Retrieved live status for Train ${trainNo}: ${rkRes.availabilityStatus}, fare: ₹${rkRes.fare}`);
+        return {
+          success: true,
+          provider: 'RailKit',
+          data: {
+            availability: [{ status: rkRes.availabilityStatus, date: dateStr }],
+            fare: { totalFare: rkRes.fare, baseFare: rkRes.fare },
+            status: rkRes.availabilityStatus,
+            totalFare: rkRes.fare,
+            lastUpdated: rkRes.lastUpdated,
+            lookupReason: 'RailKit Live API',
+          },
+        };
+      }
       return {
         success: false,
         error: err?.message || String(err),
