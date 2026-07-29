@@ -8,14 +8,32 @@ export interface DateValidationResult {
 /**
  * Validates travel date against Indian Railways' 60-day Advance Reservation Period (ARP).
  */
+export function parseAnyDateStr(dateStr: string): Date | null {
+  if (!dateStr || typeof dateStr !== "string") return null;
+  const clean = dateStr.trim();
+  if (/^\d{4}-\d{1,2}-\d{1,2}/.test(clean)) {
+    const parts = clean.split("T")[0].split("-").map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+  if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(clean)) {
+    const parts = clean.split(/[-/]/).map(Number);
+    return new Date(parts[2], parts[1] - 1, parts[0]);
+  }
+  const parsed = new Date(clean);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * Validates travel date against Indian Railways' 60-day Advance Reservation Period (ARP).
+ */
 export function validateBookingDate(dateStr: string): DateValidationResult {
-  if (!dateStr || typeof dateStr !== 'string') {
-    return { valid: false, daysFromToday: 0, error: 'Invalid or missing travel date.' };
+  if (!dateStr || typeof dateStr !== "string") {
+    return { valid: false, daysFromToday: 0, error: "Invalid or missing travel date." };
   }
 
-  const selectedDate = new Date(dateStr);
-  if (isNaN(selectedDate.getTime())) {
-    return { valid: false, daysFromToday: 0, error: 'Invalid date format. Use YYYY-MM-DD.' };
+  const selectedDate = parseAnyDateStr(dateStr);
+  if (!selectedDate || isNaN(selectedDate.getTime())) {
+    return { valid: false, daysFromToday: 0, error: "Invalid date format. Use YYYY-MM-DD or DD-MM-YYYY." };
   }
 
   const today = new Date();

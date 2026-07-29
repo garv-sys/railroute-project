@@ -288,16 +288,34 @@ function formatDurationMinutes(minutes: number) {
   return `${hours}h ${String(mins).padStart(2, '0')}m`;
 }
 
-function formatDateStr(dateStr: string) {
-  if (dateStr.includes('-') && dateStr.split('-')[0].length === 4) {
-    const parts = dateStr.split('-');
-    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+function parseAnyDateHelper(dateStr: string): Date | null {
+  if (!dateStr || typeof dateStr !== "string") return null;
+  const clean = dateStr.trim();
+  if (/^\d{4}-\d{1,2}-\d{1,2}/.test(clean)) {
+    const parts = clean.split("T")[0].split("-").map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2]);
   }
-  return dateStr;
+  if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(clean)) {
+    const parts = clean.split(/[-/]/).map(Number);
+    return new Date(parts[2], parts[1] - 1, parts[0]);
+  }
+  const parsed = new Date(clean);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateStr(dateStr: string) {
+  const d = parseAnyDateHelper(dateStr);
+  if (!d || isNaN(d.getTime())) return dateStr;
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
 }
 
 function dateFromRailDate(value: string) {
-  const [day, month, year] = formatDateStr(value).split('-').map((part) => parseInt(part, 10));
+  const d = parseAnyDateHelper(value);
+  if (d && !isNaN(d.getTime())) return d;
+  const [day, month, year] = formatDateStr(value).split("-").map((part) => parseInt(part, 10));
   return new Date(year, month - 1, day);
 }
 
@@ -306,7 +324,11 @@ function formatRailDate(value: Date) {
 }
 
 function railDateToIso(value: string) {
-  const [day, month, year] = formatDateStr(value).split('-');
+  const d = parseAnyDateHelper(value);
+  if (!d || isNaN(d.getTime())) return value;
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
   return `${year}-${month}-${day}`;
 }
 
