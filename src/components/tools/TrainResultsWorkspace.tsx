@@ -1189,7 +1189,7 @@ export function TrainResultsWorkspace() {
 	          quota={quota}
 	        />
 	      )}
-	      {hasSearched && bookableDirectCount <= 2 && visibleSplitRoutes.length > 0 && (
+	      {hasSearched && visibleSplitRoutes.length > 0 && (
 	        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 p-4 shadow-sm dark:border-indigo-500/20 dark:from-indigo-950/40 dark:via-purple-950/30 dark:to-blue-950/40">
 	          <div className="flex items-center gap-3">
 	            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-lg text-white shadow-md">
@@ -1197,27 +1197,29 @@ export function TrainResultsWorkspace() {
 	            </div>
 	            <div>
 	              <h4 className="text-sm font-black text-slate-900 dark:text-white">
-	                Only {bookableDirectCount === 1 ? "1 direct train" : `${bookableDirectCount} direct trains`} on {date}
+	                {bookableDirectCount === 0
+	                  ? "No direct trains. 18+ Split Journey Options Available!"
+	                  : `${bookableDirectCount} Direct ${bookableDirectCount === 1 ? "Train" : "Trains"} + ${visibleSplitRoutes.length} Split Journey Connections Available`}
 	              </h4>
 	              <p className="mt-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-	                Found <strong>{visibleSplitRoutes.length} split route connections</strong> via major hubs (New Delhi, Kanpur, Lucknow, Prayagraj, DDU, Varanasi).
+	                Found <strong>{visibleSplitRoutes.length} 2-leg split routes</strong> via major connecting hubs (New Delhi, Kanpur, Lucknow, Prayagraj, DDU, Varanasi, Agra).
 	              </p>
 	            </div>
 	          </div>
 	          <div className="flex items-center gap-2">
 	            <button
 	              type="button"
-	              onClick={() => setResultMode("all")}
-	              className={`rounded-xl border px-3 py-2 text-xs font-black transition-all ${resultMode === "all" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 dark:bg-white/10 dark:text-white dark:border-white/15"}`}
+	              onClick={() => setResultMode("split")}
+	              className={`rounded-xl border px-3 py-2 text-xs font-black transition-all ${resultMode === "split" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 dark:bg-white/10 dark:text-white dark:border-white/15"}`}
 	            >
-	              View All {visibleSplitRoutes.length + bookableDirectCount} Options
+	              View Split Journeys ({visibleSplitRoutes.length})
 	            </button>
 	            <button
 	              type="button"
 	              onClick={() => setResultMode("hubs")}
 	              className={`rounded-xl border px-3 py-2 text-xs font-black transition-all ${resultMode === "hubs" ? "bg-purple-600 text-white border-purple-600" : "bg-white text-purple-700 border-purple-200 hover:bg-purple-50 dark:bg-white/10 dark:text-white dark:border-white/15"}`}
 	            >
-	              🗺️ Open Hub Explorer
+	              🗺️ Hub Explorer
 	            </button>
 	          </div>
 	        </div>
@@ -1338,15 +1340,6 @@ export function TrainResultsWorkspace() {
               <LoadingBlock label="Loading direct trains..." />
             ) : visibleTrains.length > 0 ? (
               <>
-                {liveHydration.running && (
-                  <div className="mb-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/6">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-                    <span className="text-sm font-black text-slate-600 dark:text-slate-300">
-                      Checking live seats & fares — {liveHydration.done} of {liveHydration.total} ready
-                    </span>
-                  </div>
-                )}
-                
                 {validDirectTrains.length > 0 ? (
                   <>
                     <div className="mb-4 text-[11px] font-black uppercase text-slate-500 dark:text-slate-400">
