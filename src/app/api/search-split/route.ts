@@ -1,4 +1,4 @@
-import { findMultiSplitRoutes, findSmartRoutes, enrichWithLiveAvailability, getFallbackMockFare, SPLIT_HUB_CORRIDORS, computeComfortScore } from '@/services/trainService';
+import { findMultiSplitRoutes, findSmartRoutes, enrichWithLiveAvailability, getFallbackMockFare, SPLIT_HUB_CORRIDORS, computeComfortScore, sameAreaTerminalClusterFor } from '@/services/trainService';
 import { validateBookingDate } from '@/lib/date-validation';
 import { buildTrustMeta } from '@/lib/confidence';
 import { apiFailure, apiSuccess, validationFailure } from '@/lib/api-response';
@@ -40,7 +40,14 @@ export async function POST(request: Request) {
   }
   try {
     const body = await request.json();
-    const { source, destination, date, classType = "Any", directTrains = [], budget, preferredHub = "", debug = false, quota = "GN", mode = "" } = body;
+    const { source, destination, date, classType = "Any", directTrains = [], budget, preferredHub = "", debug = false, quota = "GN", mode = "", leg1Classes = [], leg2Classes = [] } = body;
+
+    // Normalise leg class arrays — filter out any falsy/invalid entries
+    const normLeg1Classes: string[] = (Array.isArray(leg1Classes) ? leg1Classes : []).map((c: string) => String(c).toUpperCase().trim()).filter(Boolean);
+    const normLeg2Classes: string[] = (Array.isArray(leg2Classes) ? leg2Classes : []).map((c: string) => String(c).toUpperCase().trim()).filter(Boolean);
+    // Effective class for enrichment/scoring: first from per-leg list, else global classType
+    const effectiveLeg1Class = normLeg1Classes.length > 0 ? normLeg1Classes[0] : classType;
+    const effectiveLeg2Class = normLeg2Classes.length > 0 ? normLeg2Classes[0] : classType;
 
     if (!source || !destination || !date) {
       return validationFailure('Missing required parameters', requestId);
@@ -58,7 +65,7 @@ export async function POST(request: Request) {
       liveLookupLimit: 0,
       coverageMode,
       exactStationOnly: false,
-      providerPairLimit: 8,
+      providerPairLimit: 20,
       maxSplitHubs: 500,
       maxSplitLegOptions: 80,
       maxSplitCandidates: 8000,
@@ -69,6 +76,8 @@ export async function POST(request: Request) {
       maxMultiResults: 20,
       plannerLegTimeoutMs: 8000,
       globalTimeoutMs: 40000,
+      leg1Classes: normLeg1Classes,
+      leg2Classes: normLeg2Classes,
     } as const;
 
     const [splitRoutes, multiSplitRoutes] = await Promise.all([
@@ -132,12 +141,13 @@ export async function POST(request: Request) {
         const l1Dest = String(r.leg1?.destination || "").toUpperCase().trim();
         const l2Src = String(r.leg2?.source || "").toUpperCase().trim();
 
-        if (l1Dest && hub && l1Dest !== hub) {
-          console.warn(`[INTEGRITY-REJECT] Discarding split route ${t1}->${hub}->${t2}: Leg 1 dest (${l1Dest}) != Hub (${hub})`);
+        const hubCluster = sameAreaTerminalClusterFor(hub);
+        if (l1Dest && hub && !hubCluster.includes(l1Dest)) {
+          console.warn(`[INTEGRITY-REJECT] Discarding split route ${t1}->${hub}->${t2}: Leg 1 dest (${l1Dest}) not in Hub cluster (${hub})`);
           return false;
         }
-        if (l2Src && hub && l2Src !== hub) {
-          console.warn(`[INTEGRITY-REJECT] Discarding split route ${t1}->${hub}->${t2}: Leg 2 src (${l2Src}) != Hub (${hub})`);
+        if (l2Src && hub && !hubCluster.includes(l2Src)) {
+          console.warn(`[INTEGRITY-REJECT] Discarding split route ${t1}->${hub}->${t2}: Leg 2 src (${l2Src}) not in Hub cluster (${hub})`);
           return false;
         }
         return true;
@@ -159,12 +169,16 @@ export async function POST(request: Request) {
         r.comfortCategory = c1.score >= c2.score ? c1.label : c2.label;
 
         const comfortBonus = c1.score + c2.score;
+        const hub = String(r.hubStation || '').toUpperCase();
+        const isDelhiHub = ['NDLS', 'DLI', 'NZM', 'DEE', 'DEC', 'ANVT'].includes(hub);
         const layoverHrs = typeof r.layoverHours === 'number' ? r.layoverHours : 2;
-        const layoverBonus = (layoverHrs >= 0.75 && layoverHrs <= 3.5) ? 25 : 0;
+        const maxLayoverBonusThreshold = isDelhiHub ? 10.0 : 4.5;
+        const layoverBonus = (layoverHrs >= 0.75 && layoverHrs <= maxLayoverBonusThreshold) ? 25 : 0;
+        const hubCapitalBonus = isDelhiHub ? 45 : 0;
         const totalFare = r.totalFare || 1500;
         const farePenalty = totalFare * 0.005;
 
-        r.score = Math.round(((r.score || 50) + comfortBonus + layoverBonus - farePenalty) * 10) / 10;
+        r.score = Math.round(((r.score || 50) + comfortBonus + layoverBonus + hubCapitalBonus - farePenalty) * 10) / 10;
 
         const existing = bestRoutesByTrainPair.get(pairKey);
         if (!existing || (r.score || 0) > (existing.score || 0)) {
@@ -188,12 +202,20 @@ export async function POST(request: Request) {
         routesByCluster.get(cluster)!.push(r);
       }
 
+      const priorityClusters = ["DELHI", "AGRA", "PRAYAGRAJ", "LUCKNOW", "KANPUR", "DDU", "GWL"];
       const clusterRankings = Array.from(routesByCluster.entries()).map(([cluster, list]) => ({
         cluster,
         bestScore: list[0]?.score || 0,
       }));
-      clusterRankings.sort((a, b) => b.bestScore - a.bestScore);
-      const topClusters = clusterRankings.slice(0, 5).map((c) => c.cluster);
+      clusterRankings.sort((a: any, b: any) => {
+        const pA = priorityClusters.indexOf(a.cluster);
+        const pB = priorityClusters.indexOf(b.cluster);
+        if (pA !== -1 && pB !== -1) return pA - pB;
+        if (pA !== -1) return -1;
+        if (pB !== -1) return 1;
+        return b.bestScore - a.bestScore;
+      });
+      const topClusters = clusterRankings.slice(0, 8).map((c: any) => c.cluster);
 
       const selected: any[] = [];
       const selectedTrainPairs = new Set<string>();
@@ -221,11 +243,11 @@ export async function POST(request: Request) {
             if (selectedTrainPairs.has(pairKey)) return false;
 
             const stCount = stationCounts.get(r.hubStation) || 0;
-            if (stCount >= 2) return false;
+            if (stCount >= 4) return false;
 
             const l1Count = leg1TrainCounts.get(t1) || 0;
             const l2Count = leg2TrainCounts.get(t2) || 0;
-            if (l1Count >= 2 || l2Count >= 2) return false;
+            if (l1Count >= 3 || l2Count >= 3) return false;
 
             return true;
           });
@@ -257,7 +279,7 @@ export async function POST(request: Request) {
 
           const l1Count = leg1TrainCounts.get(t1) || 0;
           const l2Count = leg2TrainCounts.get(t2) || 0;
-          if (l1Count >= 2 || l2Count >= 2) continue;
+          if (l1Count >= 3 || l2Count >= 3) continue;
 
           selected.push(cand);
           selectedTrainPairs.add(pairKey);
@@ -274,14 +296,40 @@ export async function POST(request: Request) {
     const diverseRoutes = getDiverseSplitRoutes(splitRoutes, 40);
     console.log('[search-split] diverseRoutes after diversity filter:', diverseRoutes.length);
 
+    // ── Per-leg class filter ──────────────────────────────────────────────────
+    // If leg1Classes or leg2Classes are specified, keep only candidates that
+    // have the requested class available on that leg. If fewer than 15 remain,
+    // we relax the filter and fill from the full pool.
+    const classMatchesLeg = (leg: any, classes: string[]): boolean => {
+      if (classes.length === 0) return true; // Any
+      const legClass = String(leg?.classType || leg?.class_type || '').toUpperCase();
+      const legClasses = (leg?.classes || leg?.class_list || []).map((c: any) => String(c).toUpperCase());
+      return classes.some(c => legClass === c || legClasses.includes(c));
+    };
+
+    let filteredByLegClass = diverseRoutes;
+    if (normLeg1Classes.length > 0 || normLeg2Classes.length > 0) {
+      const strict = diverseRoutes.filter(r =>
+        classMatchesLeg(r.leg1, normLeg1Classes) && classMatchesLeg(r.leg2, normLeg2Classes)
+      );
+      // Fill to at least 15 from the full pool if strict filter leaves too few
+      if (strict.length < 15) {
+        const strictPairs = new Set(strict.map((r: any) => `${cleanTrain(r.leg1?.trainNo)}_${cleanTrain(r.leg2?.trainNo)}`));
+        const relaxed = diverseRoutes.filter(r => !strictPairs.has(`${cleanTrain(r.leg1?.trainNo)}_${cleanTrain(r.leg2?.trainNo)}`));
+        filteredByLegClass = [...strict, ...relaxed].slice(0, 40);
+      } else {
+        filteredByLegClass = strict;
+      }
+    }
+
     const verifiedRoutes: any[] = [];
     const unverifiedRoutes: any[] = [];
 
-    if (diverseRoutes.length > 0) {
-      console.log(`[search-split] Starting parallel enrichment of ${diverseRoutes.length} candidates...`);
+    if (filteredByLegClass.length > 0) {
+      console.log(`[search-split] Starting parallel enrichment of ${filteredByLegClass.length} candidates (leg1Classes=${normLeg1Classes.join(',') || 'any'}, leg2Classes=${normLeg2Classes.join(',') || 'any'})...`);
       const perRouteTimeoutMs = 6000;
 
-      await Promise.all(diverseRoutes.map(async (route) => {
+      await Promise.all(filteredByLegClass.map(async (route) => {
         if (isLegBlocked(route.leg1) || isLegBlocked(route.leg2)) return;
 
         const leg1Date = route.leg1Date || date;
@@ -289,12 +337,12 @@ export async function POST(request: Request) {
         try {
           const [leg1Enriched, leg2Enriched] = await Promise.all([
             withTimeout(
-              enrichWithLiveAvailability(route.leg1, leg1Date, classType, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
+              enrichWithLiveAvailability(route.leg1, leg1Date, effectiveLeg1Class, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
               perRouteTimeoutMs,
               route.leg1
             ),
             withTimeout(
-              enrichWithLiveAvailability(route.leg2, leg2Date, classType, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
+              enrichWithLiveAvailability(route.leg2, leg2Date, effectiveLeg2Class, { fetchLive: true, fetchAllClasses: false, debug: false }, quota),
               perRouteTimeoutMs,
               route.leg2
             ),

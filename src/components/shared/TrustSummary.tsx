@@ -218,10 +218,15 @@ export function SearchResultSummary({
     <div className={softPanel("mt-6 rounded-2xl p-4")}>
       <div className="grid gap-3 md:grid-cols-4">
         <div>
-          <div className="text-[10px] font-black uppercase text-slate-400">Showing</div>
+          <div className="text-[10px] font-black uppercase text-slate-400">Total Available Options</div>
           <div className="mt-1 text-2xl font-black">
             {showFindingOptions ? "Finding..." : `${optionCount} option${optionCount === 1 ? "" : "s"}`}
           </div>
+          {splitCount > 0 && !showFindingOptions && (
+            <div className="mt-0.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+              {directCount} direct + {splitCount} split routes
+            </div>
+          )}
         </div>
         <div>
           <div className="text-[10px] font-black uppercase text-slate-400">Live direct trains</div>

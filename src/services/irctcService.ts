@@ -418,8 +418,9 @@ export async function checkSeatAvailability(trainNo: string, fromStn: string, to
       let fareObj = response?.data?.fare;
 
       const hasNoFare = !fareObj || fareObj.totalFare === 0 || fareObj.Fare === 0 || fareObj.Amount === 0 || fareObj.total === 0;
+      const isExplicitError = response?.success === false || !!response?.error || !!response?.data?.error;
 
-      if (rows.length === 0 || hasNoFare) {
+      if (!isExplicitError && (rows.length === 0 || hasNoFare)) {
         console.log(`[IRCTC] Empty availability or missing fare. Retrying once for Train ${trainNo} after 2000ms...`);
         await new Promise((r) => setTimeout(r, 2000));
         const retryResponse = await callWithRetry(doFetch, 3, 'availability');

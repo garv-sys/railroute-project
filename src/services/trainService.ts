@@ -194,6 +194,8 @@ type TrainSearchOptions = {
   maxHubs?: number;
   minLayoverMins?: number;
   maxLayoverMins?: number;
+  leg1Classes?: string[];
+  leg2Classes?: string[];
 };
 
 export interface SplitRouteResult {
@@ -681,13 +683,45 @@ function trainRouteCodes(train: any) {
 function trainMatchesRequestedLeg(train: any, source: string, dest: string): boolean | null {
   const route = trainRouteCodes(train);
   if (route.length > 0) {
-    const sourceIndex = route.indexOf(source);
-    const destIndex = route.indexOf(dest);
-    if (sourceIndex === -1 || destIndex === -1) return null;
-    return sourceIndex < destIndex;
+    const sourceCluster = sameAreaTerminalClusterFor(source);
+    const destCluster = sameAreaTerminalClusterFor(dest);
+    
+    let firstSrcIdx = Infinity;
+    for (const sCode of sourceCluster) {
+      const idx = route.indexOf(sCode);
+      if (idx !== -1 && idx < firstSrcIdx) firstSrcIdx = idx;
+    }
+    
+    let firstDstIdx = -1;
+    for (const dCode of destCluster) {
+      const idx = route.indexOf(dCode);
+      if (idx !== -1 && (firstDstIdx === -1 || idx > firstDstIdx)) firstDstIdx = idx;
+    }
+
+    if (firstSrcIdx === Infinity || firstDstIdx === -1) return null;
+    return firstSrcIdx < firstDstIdx;
   }
 
   return null;
+}
+
+function trainMatchesSearchScope(train: any, source: string, dest: string) {
+  // First check full route station order if route is available
+  const legOrder = trainMatchesRequestedLeg(train, source, dest);
+  if (legOrder !== null) return legOrder;
+
+  const sourceScope = sameAreaTerminalClusterFor(source);
+  const destScope = sameAreaTerminalClusterFor(dest);
+  const rawSource = rawTrainSource(train);
+  const rawDest = rawTrainDestination(train);
+
+  if (rawSource) {
+    const srcOk = sourceScope.includes(rawSource);
+    const dstOk = !rawDest || destScope.includes(rawDest);
+    if (srcOk && (dstOk || destScope.length > 0)) return true;
+  }
+
+  return false;
 }
 
 const CITY_TERMINAL_CLUSTERS: Record<string, string[]> = {
@@ -919,7 +953,7 @@ function terminalClusterFor(code: string) {
   return CITY_TERMINAL_CLUSTERS[code] || [code];
 }
 
-function sameAreaTerminalClusterFor(code: string, maxKm = 60) {
+export function sameAreaTerminalClusterFor(code: string, maxKm = 60) {
   const normalized = normalizeStationCode(code);
   const cluster = terminalClusterFor(normalized);
   const coord = stationCoordinatesForRouting(normalized);
@@ -936,33 +970,7 @@ function uniqueStationPairs(pairs: { source: string; dest: string }[]) {
   return Array.from(new Map(pairs.map((pair) => [`${pair.source}_${pair.dest}`, pair])).values());
 }
 
-function trainMatchesSearchScope(train: any, source: string, dest: string) {
-  const sourceScope = sameAreaTerminalClusterFor(source);
-  const destScope = sameAreaTerminalClusterFor(dest);
-  const rawSource = rawTrainSource(train);
-  const rawDest = rawTrainDestination(train);
 
-  // When the provider reports both ends of this train's leg (from_stn_code/to_stn_code
-  // — present on essentially every real "trains between stations" response item), that
-  // is a complete, authoritative signal: trust it fully instead of falling back to a
-  // fuzzy "one side looks plausible" guess. A fuzzy guess is exactly what let
-  // wrong-direction trains (and, in principle, wrong-destination ones) through before —
-  // e.g. accepting a train because its origin was near Patna without checking that its
-  // reported destination was actually Jaipur and not somewhere else entirely.
-  if (rawSource && rawDest) {
-    return sourceScope.includes(rawSource) && destScope.includes(rawDest);
-  }
-
-  // Provider didn't give a usable from/to for this train — fall back to the full
-  // intermediate route order, if one was supplied.
-  const legOrder = trainMatchesRequestedLeg(train, source, dest);
-  if (legOrder !== null) return legOrder;
-
-  // No reliable signal whatsoever (this should be rare in practice). Reject rather
-  // than guess — admitting an unverifiable train risks exactly the bug this function
-  // exists to prevent.
-  return false;
-}
 
 function shouldDedupeTrainNumberVariants(source: string, dest: string) {
   return sameAreaTerminalClusterFor(source).length > 1 || sameAreaTerminalClusterFor(dest).length > 1;
@@ -1321,11 +1329,14 @@ export function dynamicSplitHubCandidates(source: string, dest: string, preferre
     const hubObj = MAJOR_HUB_BY_CODE.get(code) || { code, lat: coord.lat, lon: coord.lon };
     let score = dynamicHubScore(sourceCoord, destCoord, hubObj as MajorHub);
     
-    // Penalize out-of-way detours (e.g. going far north to NDLS for a west journey)
-    const totalDist = haversineKm(sourceCoord, coord) + haversineKm(coord, destCoord);
-    const detourRatio = totalDist / directDistance;
-    if (detourRatio > 1.25) {
-      score += (detourRatio - 1.25) * 800;
+    // Penalize out-of-way detours — but skip for user-priority hubs (NDLS, DDU, LKO etc)
+    // since those are explicitly wanted regardless of detour
+    if (!USER_PRIORITY_HUBS.has(code)) {
+      const totalDist = haversineKm(sourceCoord, coord) + haversineKm(coord, destCoord);
+      const detourRatio = totalDist / directDistance;
+      if (detourRatio > 1.5) {
+        score += (detourRatio - 1.5) * 800;
+      }
     }
     return score;
   };
@@ -2497,8 +2508,8 @@ export async function generateSplitCandidates(
 
   const legOpts: TrainSearchOptions = {
     ...options,
-    fetchLive: false,
-    providerPairLimit: 2,
+    fetchLive: options.fetchLive !== false, // respect caller's fetchLive
+    providerPairLimit: Math.max(5, options.providerPairLimit || 5), // respect caller, min 5 to cover all Delhi terminals
     plannerLegTimeoutMs: 3500,
     maxSplitCandidates: 50,
   };
@@ -2541,8 +2552,8 @@ export async function generateSplitCandidates(
         continue;
       }
 
-      for (const t1 of l1.slice(0, 10)) {
-        for (const t2 of l2.slice(0, 10)) {
+      for (const t1 of l1.slice(0, 15)) {
+        for (const t2 of l2.slice(0, 15)) {
           totalRoutesGeneratedCount++;
           const tn1 = (t1.trainNo || t1.train_no || '').toString().replace(/\D/g, '');
           const tn2 = (t2.trainNo || t2.train_no || '').toString().replace(/\D/g, '');
@@ -2724,12 +2735,16 @@ function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15, directT
     
     // Composite ranking score
     const comfortBonus = c1.score + c2.score;
+    const hub = String(r.hubStation || '').toUpperCase();
+    const isDelhiHub = ['NDLS', 'DLI', 'NZM', 'DEE', 'DEC', 'ANVT'].includes(hub);
     const layoverHrs = typeof r.layoverHours === 'number' ? r.layoverHours : 2;
-    const layoverBonus = (layoverHrs >= 0.75 && layoverHrs <= 3.5) ? 25 : 0;
+    const maxLayoverBonusThreshold = isDelhiHub ? 10.0 : 4.5;
+    const layoverBonus = (layoverHrs >= 0.75 && layoverHrs <= maxLayoverBonusThreshold) ? 25 : 0;
+    const hubCapitalBonus = isDelhiHub ? 45 : 0;
     const totalFare = r.totalFare || 1500;
     const farePenalty = totalFare * 0.005;
 
-    r.score = Math.round(((r.score || 50) + comfortBonus + layoverBonus - farePenalty) * 10) / 10;
+    r.score = Math.round(((r.score || 50) + comfortBonus + layoverBonus + hubCapitalBonus - farePenalty) * 10) / 10;
 
     const existing = bestRoutesByTrainPair.get(pairKey);
     if (!existing || (r.score || 0) > (existing.score || 0)) {
@@ -2753,12 +2768,20 @@ function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15, directT
     routesByCluster.get(cluster)!.push(r);
   }
 
+  const priorityClusters = ["DELHI", "AGRA", "PRAYAGRAJ", "LUCKNOW", "KANPUR", "DDU", "GWL"];
   const clusterRankings = Array.from(routesByCluster.entries()).map(([cluster, list]) => ({
     cluster,
     bestScore: list[0]?.score || 0,
   }));
-  clusterRankings.sort((a, b) => b.bestScore - a.bestScore);
-  const topClusters = clusterRankings.slice(0, 5).map((c) => c.cluster);
+  clusterRankings.sort((a, b) => {
+    const pA = priorityClusters.indexOf(a.cluster);
+    const pB = priorityClusters.indexOf(b.cluster);
+    if (pA !== -1 && pB !== -1) return pA - pB;
+    if (pA !== -1) return -1;
+    if (pB !== -1) return 1;
+    return b.bestScore - a.bestScore;
+  });
+  const topClusters = clusterRankings.slice(0, 8).map((c) => c.cluster);
 
   const selected: SplitRouteResult[] = [];
   const selectedTrainPairs = new Set<string>();
@@ -2787,11 +2810,11 @@ function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15, directT
         if (selectedTrainPairs.has(pairKey)) return false;
 
         const stCount = stationCounts.get(r.hubStation) || 0;
-        if (stCount >= 2) return false;
+        if (stCount >= 4) return false;
 
         const l1Count = leg1TrainCounts.get(t1) || 0;
         const l2Count = leg2TrainCounts.get(t2) || 0;
-        if (l1Count >= 2 || l2Count >= 2) return false;
+        if (l1Count >= 3 || l2Count >= 3) return false;
 
         return true;
       });
@@ -2824,7 +2847,7 @@ function selectDiverseHubRoutes(results: SplitRouteResult[], limit = 15, directT
 
       const l1Count = leg1TrainCounts.get(t1) || 0;
       const l2Count = leg2TrainCounts.get(t2) || 0;
-      if (l1Count >= 2 || l2Count >= 2) continue;
+      if (l1Count >= 3 || l2Count >= 3) continue;
 
       selected.push(cand);
       selectedTrainPairs.add(pairKey);
@@ -3057,8 +3080,16 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
     if (!hubsByCluster.has(cluster)) hubsByCluster.set(cluster, []);
     hubsByCluster.get(cluster)!.push(h);
   }
-  const availableClusters = Array.from(hubsByCluster.keys());
-  const maxClustersToExplore = Math.min(availableClusters.length, 8);
+  const primaryHubPriority = ["DELHI", "NDLS", "DLI", "PRAYAGRAJ", "PRYJ", "KANPUR", "CNB", "AGRA", "AGC", "LUCKNOW", "LKO", "GWALIOR", "GWL", "DDU", "VARANASI", "BSB", "JHANSI", "JHS"];
+  const availableClusters = Array.from(hubsByCluster.keys()).sort((a, b) => {
+    const idxA = primaryHubPriority.indexOf(a);
+    const idxB = primaryHubPriority.indexOf(b);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return 0;
+  });
+  const maxClustersToExplore = Math.min(availableClusters.length, 10);
   const topClusters = availableClusters.slice(0, maxClustersToExplore);
   const hubs: string[] = [];
   for (const cluster of topClusters) {
@@ -3068,7 +3099,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
 
   console.log(`[TRACER] [findSmartRoutesForDate] Adaptive Hub Discovery: Corridor richness = ${availableClusters.length} clusters. Exploring ${topClusters.length} clusters (${hubs.length} hub stations): ${hubs.join(', ')}`);
 
-  const legOpts: TrainSearchOptions = { ...options, fetchLive: false, providerPairLimit: 2, maxSplitCandidates: 100 };
+  const legOpts: TrainSearchOptions = { ...options, fetchLive: false, providerPairLimit: 5, maxSplitCandidates: 100 };
   const allRoutes: any[] = [];
   const seen = new Set<string>();
   const globalT1Contrib = new Map<string, number>();
@@ -3141,16 +3172,20 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
           return;
         }
 
-      const cleanClass = classType && classType !== 'Any' ? classType.toUpperCase() : '';
+      const l1Classes = (options.leg1Classes && options.leg1Classes.length > 0) ? options.leg1Classes : (classType && classType !== 'Any' ? [classType] : []);
+      const l2Classes = (options.leg2Classes && options.leg2Classes.length > 0) ? options.leg2Classes : (classType && classType !== 'Any' ? [classType] : []);
+
       let filteredL1 = l1;
       let filteredL2 = l2;
-      if (cleanClass) {
-        filteredL1 = l1.filter(t => trainSupportsClass(t, cleanClass));
-        filteredL2 = l2.filter(t => trainSupportsClass(t, cleanClass));
+
+      if (l1Classes.length > 0) {
+        const matchingL1 = l1.filter(t => l1Classes.some(c => trainSupportsClass(t, c)));
+        if (matchingL1.length > 0) filteredL1 = matchingL1;
       }
 
-      if (filteredL1.length === 0 || filteredL2.length === 0) {
-        return;
+      if (l2Classes.length > 0) {
+        const matchingL2 = l2.filter(t => l2Classes.some(c => trainSupportsClass(t, c)));
+        if (matchingL2.length > 0) filteredL2 = matchingL2;
       }
 
       // Per-hub diversity cap: each hub contributes at most 30 candidates, with a max of 4 per individual Leg 1 train
@@ -3262,11 +3297,19 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
         }
       }
 
+      // Determine per-leg class: use leg1Classes/leg2Classes if provided, else fall back to global classType
+      const leg1ClassArr = options.leg1Classes ?? [];
+      const leg2ClassArr = options.leg2Classes ?? [];
+      const effectiveLeg1Class = leg1ClassArr.length > 0 ? leg1ClassArr[0] : classType;
+      const effectiveLeg2Class = leg2ClassArr.length > 0 ? leg2ClassArr[0] : classType;
       const liveOpts: TrainSearchOptions = { ...options, fetchLive: options.fetchLive !== false, fetchAllClasses: false, debug: false };
       const [e1, e2] = await Promise.all([
-        enrichWithLiveAvailability({ ...route.t1 }, formattedDate, classType, liveOpts, quota),
-        enrichWithLiveAvailability({ ...route.t2 }, formattedDate, classType, liveOpts, quota),
+        enrichWithLiveAvailability({ ...route.t1 }, formattedDate, effectiveLeg1Class, liveOpts, quota),
+        enrichWithLiveAvailability({ ...route.t2 }, formattedDate, effectiveLeg2Class, liveOpts, quota),
       ]);
+      // Stamp the per-leg classes used so the UI can display them
+      if (e1 && leg1ClassArr.length > 0) e1.classType = effectiveLeg1Class;
+      if (e2 && leg2ClassArr.length > 0) e2.classType = effectiveLeg2Class;
 
       // HARD INVARIANT CHECK 1: Leg 1 destination must be Hub, Leg 2 source must be Hub
       e1.destination = route.hub;

@@ -95,6 +95,8 @@ import { ProductShell } from "../layout/ProductShell";
 import { ToolHeader } from "../layout/ToolHeader";
 import { CoachExplorer } from "./CoachExplorer";
 import { BookingWorkspace } from "./BookingWorkspace";
+import { HubExplorerPanel } from "./HubExplorerPanel";
+import { SplitClassFilterPanel, type SplitClassFilterState } from "./SplitClassFilterPanel";
 
 
 export function TrainResultsWorkspace() {
@@ -126,8 +128,10 @@ export function TrainResultsWorkspace() {
   const [date, setDate] = useState(initialDate);
   const [classType, setClassType] = useState(initialClass);
   const [quota, setQuota] = useState(initialQuota);
+  const [leg1Classes, setLeg1Classes] = useState<string[]>([]);
+  const [leg2Classes, setLeg2Classes] = useState<string[]>([]);
   const allowSplit = true;
-  const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi">("all");
+  const [resultMode, setResultMode] = useState<"all" | "direct" | "split" | "multi" | "hubs">("all");
   const [sortBy, setSortBy] = useState<"best" | "cheapest" | "highestFare" | "fastest" | "lowestLayover" | "earliest" | "latest" | "availability">("best");
   const [maxFare, setMaxFare] = useState("");
   const [maxDuration, setMaxDuration] = useState("");
@@ -513,7 +517,27 @@ export function TrainResultsWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  async function runSearch(event?: FormEvent, override?: { source: string; destination: string; date: string; classType: string; quota?: string; preferredHub?: string; fetchSplits?: boolean; pushUrl?: boolean }) {
+  const handleSplitClassFilterChange = (newFilters: SplitClassFilterState) => {
+    setLeg1Classes(newFilters.leg1Classes);
+    setLeg2Classes(newFilters.leg2Classes);
+    if (hasSearched && source && destination && date) {
+      const resolvedSource = resolveStationInput(source, sourceQuery);
+      const resolvedDestination = resolveStationInput(destination, destinationQuery);
+      const resolvedPreferredHub = resolveStationInput(preferredHub, preferredHubQuery);
+      runSearch(undefined, {
+        source: resolvedSource,
+        destination: resolvedDestination,
+        date,
+        classType,
+        quota,
+        preferredHub: resolvedPreferredHub && resolvedPreferredHub !== resolvedSource && resolvedPreferredHub !== resolvedDestination ? resolvedPreferredHub : "",
+        leg1Classes: newFilters.leg1Classes,
+        leg2Classes: newFilters.leg2Classes,
+      });
+    }
+  };
+
+  async function runSearch(event?: FormEvent, override?: { source: string; destination: string; date: string; classType: string; quota?: string; preferredHub?: string; fetchSplits?: boolean; pushUrl?: boolean; leg1Classes?: string[]; leg2Classes?: string[] }) {
     event?.preventDefault();
     const resolvedSource = resolveStationInput(source, sourceQuery);
     const resolvedDestination = resolveStationInput(destination, destinationQuery);
@@ -525,7 +549,11 @@ export function TrainResultsWorkspace() {
       classType,
       quota,
       preferredHub: resolvedPreferredHub && resolvedPreferredHub !== resolvedSource && resolvedPreferredHub !== resolvedDestination ? resolvedPreferredHub : "",
+      leg1Classes,
+      leg2Classes,
     };
+    const activeLeg1Classes = override?.leg1Classes !== undefined ? override.leg1Classes : leg1Classes;
+    const activeLeg2Classes = override?.leg2Classes !== undefined ? override.leg2Classes : leg2Classes;
     const providerPayload = {
       source: payload.source,
       destination: payload.destination,
@@ -614,6 +642,8 @@ export function TrainResultsWorkspace() {
 
       const forwardSplitPromise = postJson<any>("/api/search-split", {
         ...requestPayload,
+        leg1Classes: activeLeg1Classes,
+        leg2Classes: activeLeg2Classes,
         directTrains: [],
         mode: "full",
       })
@@ -1149,8 +1179,8 @@ export function TrainResultsWorkspace() {
 	      {(hasSearched || state.loading || state.splitLoading || state.trains.length > 0 || state.splits.length > 0 || state.multiSplits.length > 0) && (
 	        <SearchResultSummary
 	          trains={filteredTrains}
-	          splitCount={showSplitResults ? visibleSplitRoutes.length : 0}
-	          multiSplitCount={showSplitResults ? filteredMultiSplits.length : 0}
+	          splitCount={visibleSplitRoutes.length}
+	          multiSplitCount={filteredMultiSplits.length}
 	          scheduleOnlyDirectCount={scheduleOnlyDirectCount}
 	          loading={state.loading}
 	          splitLoading={state.splitLoading}
@@ -1158,6 +1188,39 @@ export function TrainResultsWorkspace() {
 	          classType={classType}
 	          quota={quota}
 	        />
+	      )}
+	      {hasSearched && bookableDirectCount <= 2 && visibleSplitRoutes.length > 0 && (
+	        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 p-4 shadow-sm dark:border-indigo-500/20 dark:from-indigo-950/40 dark:via-purple-950/30 dark:to-blue-950/40">
+	          <div className="flex items-center gap-3">
+	            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-lg text-white shadow-md">
+	              🔀
+	            </div>
+	            <div>
+	              <h4 className="text-sm font-black text-slate-900 dark:text-white">
+	                Only {bookableDirectCount === 1 ? "1 direct train" : `${bookableDirectCount} direct trains`} on {date}
+	              </h4>
+	              <p className="mt-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+	                Found <strong>{visibleSplitRoutes.length} split route connections</strong> via major hubs (New Delhi, Kanpur, Lucknow, Prayagraj, DDU, Varanasi).
+	              </p>
+	            </div>
+	          </div>
+	          <div className="flex items-center gap-2">
+	            <button
+	              type="button"
+	              onClick={() => setResultMode("all")}
+	              className={`rounded-xl border px-3 py-2 text-xs font-black transition-all ${resultMode === "all" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 dark:bg-white/10 dark:text-white dark:border-white/15"}`}
+	            >
+	              View All {visibleSplitRoutes.length + bookableDirectCount} Options
+	            </button>
+	            <button
+	              type="button"
+	              onClick={() => setResultMode("hubs")}
+	              className={`rounded-xl border px-3 py-2 text-xs font-black transition-all ${resultMode === "hubs" ? "bg-purple-600 text-white border-purple-600" : "bg-white text-purple-700 border-purple-200 hover:bg-purple-50 dark:bg-white/10 dark:text-white dark:border-white/15"}`}
+	            >
+	              🗺️ Open Hub Explorer
+	            </button>
+	          </div>
+	        </div>
 	      )}
 	      {hasSearched && !state.loading && !state.splitLoading && bookableDirectCount < 3 && source && destination && (
 	        <NearbyDateSuggestions
@@ -1170,47 +1233,7 @@ export function TrainResultsWorkspace() {
 	          onSelectDate={selectNearbyDate}
 	        />
 	      )}
-      {(state.trains.length > 0 || state.splits.length > 0 || state.multiSplits.length > 0) && (liveHydration.total > 0 || liveHydration.deferred > 0) && (
-        <div className="mt-4 rounded-2xl border border-cyan-300/30 bg-cyan-50 px-4 py-3 text-sm dark:border-cyan-300/20 dark:bg-cyan-300/8">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] font-black uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
-                Selected-class live fare + availability queue
-              </div>
-            <div className="mt-1 font-bold text-slate-700 dark:text-slate-200">
-                {liveHydration.running
-                  ? `Checking ${liveHydration.current || "provider data"} · ${Math.min(liveHydration.done, liveHydration.total)}/${liveHydration.total}`
-                  : liveHydration.total > 0
-                    ? `Checked ${Math.min(liveHydration.done, liveHydration.total)}/${liveHydration.total} selected-class requests`
-                    : "Automatic live checks deferred"}
-                {liveHydration.deferred > 0 ? ` · ${liveHydration.deferred} more exact row/leg checks available on buttons` : ""}
-              </div>
-              <div className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                Train list may be cached; fare and seat checks use each row&apos;s exact train/source/destination/date/class/{quota} quota.
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="rounded-md border border-cyan-300/35 bg-white px-3 py-2 text-[11px] font-black text-cyan-800 dark:bg-white/8 dark:text-cyan-100">
-                Parallel live checks
-              </span>
-              {liveHydration.running ? (
-                <button type="button" onClick={stopAutomaticLiveChecks} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-[11px] font-black text-slate-700 dark:border-white/10 dark:bg-white/8 dark:text-slate-200">
-                  Stop queue
-                </button>
-              ) : (
-                <button type="button" onClick={retryPriorityLiveChecks} className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-[11px] font-black text-emerald-800 dark:bg-emerald-300/12 dark:text-emerald-100">
-                  Check all live
-                </button>
-              )}
-              {liveHydration.rateLimited > 0 && (
-                <span className="rounded-md border border-amber-300/45 bg-amber-50 px-3 py-2 text-[11px] font-black text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
-                  {liveHydration.rateLimited} checks still queued
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+
       {(hasSearched || state.loading || state.splitLoading || state.trains.length > 0 || state.splits.length > 0 || state.multiSplits.length > 0) && (
         <div className={softPanel("mt-6 rounded-[28px] p-4")}>
 	          <div className="flex flex-wrap gap-2">
@@ -1221,10 +1244,32 @@ export function TrainResultsWorkspace() {
 	              ["direct", directTabLabel],
 	              ["split", state.splitLoading && visibleSplitCount === 0 ? "Split Journey (finding...)" : `Split Journey (${visibleSplitCount})`],
 	            ].map(([key, label]) => (
-              <button key={key} type="button" onClick={() => setResultMode(key as "all" | "direct" | "split" | "multi")} className={`rounded-full border px-4 py-2 text-xs font-black ${resultMode === key ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 bg-white text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300"}`}>
+              <button key={key} type="button" onClick={() => setResultMode(key as "all" | "direct" | "split" | "multi" | "hubs")} className={`rounded-full border px-4 py-2 text-xs font-black ${resultMode === key ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 bg-white text-slate-500 dark:border-white/10 dark:bg-white/6 dark:text-slate-300"}`}>
                 {label}
               </button>
             ))}
+            {/* Hub Explorer tab — only show when there are split routes */}
+            {(state.splits.length > 0 || state.splitLoading) && (
+              <button
+                type="button"
+                onClick={() => setResultMode("hubs")}
+                className={`flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-black transition-all ${
+                  resultMode === "hubs"
+                    ? "border-violet-600 bg-violet-600 text-white dark:border-violet-400 dark:bg-violet-400 dark:text-slate-950"
+                    : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-400/20 dark:bg-violet-400/10 dark:text-violet-200"
+                }`}
+              >
+                <span>🗺️</span>
+                <span>Hub Explorer</span>
+                {state.splits.length > 0 && (
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-black ${
+                    resultMode === "hubs" ? "bg-white/20 text-white" : "bg-violet-100 text-violet-700 dark:bg-white/10 dark:text-violet-200"
+                  }`}>
+                    {state.splits.length}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-5">
             <select aria-label="Sort results" value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} className="h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black dark:border-white/10 dark:bg-[#111827] dark:text-white">
@@ -1353,6 +1398,14 @@ export function TrainResultsWorkspace() {
                   : "Ranked two-leg journeys found from provider-returned train legs. Each leg is checked separately with its exact station pair, date, class, and quota."
               }
             />
+            <SplitClassFilterPanel
+              leg1Name={`Leg 1 (${stationCompactLabel(source) || "Origin"} → Hub)`}
+              leg2Name={`Leg 2 (Hub → ${stationCompactLabel(destination) || "Destination"})`}
+              leg1Classes={leg1Classes}
+              leg2Classes={leg2Classes}
+              onChange={handleSplitClassFilterChange}
+              onReset={() => handleSplitClassFilterChange({ leg1Classes: [], leg2Classes: [] })}
+            />
             {state.splitLoading && state.splits.length === 0 ? (
               <LoadingBlock label="Finding split and multi-split journeys..." />
             ) : visibleSplitRoutes.length > 0 || filteredMultiSplits.length > 0 ? (
@@ -1371,6 +1424,31 @@ export function TrainResultsWorkspace() {
                 </p>
               </div>
             )}
+          </>
+        )}
+        {/* Hub Explorer mode */}
+        {resultMode === "hubs" && (
+          <>
+            <SplitClassFilterPanel
+              leg1Name={`Leg 1 (${stationCompactLabel(source) || "Origin"} → Hub)`}
+              leg2Name={`Leg 2 (Hub → ${stationCompactLabel(destination) || "Destination"})`}
+              leg1Classes={leg1Classes}
+              leg2Classes={leg2Classes}
+              onChange={handleSplitClassFilterChange}
+              onReset={() => handleSplitClassFilterChange({ leg1Classes: [], leg2Classes: [] })}
+            />
+            <HubExplorerPanel
+              splits={state.splits}
+              directTrains={state.trains}
+              date={date}
+              classType={classType}
+              quota={quota}
+              source={source}
+              destination={destination}
+              loading={state.splitLoading}
+              leg1Classes={leg1Classes}
+              leg2Classes={leg2Classes}
+            />
           </>
         )}
         {!state.loading && !state.splitLoading && (state.trains.length > 0 || state.splits.length > 0 || state.multiSplits.length > 0) && !visibleTrains.length && !visibleSplitRoutes.length && !filteredMultiSplits.length && (
@@ -1921,9 +1999,6 @@ export function PremiumTrainCard({
             <DataBadge type={train.isCityTerminalOption ? "NEARBY BOARDING" : "LIVE"} label={train.isCityTerminalOption ? "Nearby / terminal train" : "Direct train"} />
             <DataBadge type={badgeTypeFromSource(trustMeta.source)} label={train.dataSource || trustMeta.provider} />
             {hasProviderFareOrAvailability && <DataBadge type="LIVE" label="Live Data Available" />}
-            {(!hasProviderFareOrAvailability || train.fareStatus === 'estimated') && (
-              <DataBadge type="ESTIMATED" label="Estimated — not confirmed" />
-            )}
           </div>
           <TrustSummary meta={trustMeta} />
           <h3 className="mt-4 text-2xl font-black">{trainNumberName(train)}</h3>
@@ -2637,35 +2712,14 @@ export function ClassRateStrip({
           return (
             <div
               key={`${train?.trainNo || "train"}-${classCode}`}
-              className="w-full min-w-0 rounded-xl border border-cyan-300 bg-cyan-50/70 p-3 dark:border-cyan-300/25 dark:bg-cyan-300/10"
+              className="w-full min-w-0 rounded-xl border border-cyan-500/30 bg-gradient-to-r from-slate-900/90 via-cyan-950/40 to-slate-900/90 p-3 shadow-md backdrop-blur-md animate-pulse"
             >
-              <div className="flex items-center gap-2 text-cyan-800 dark:text-cyan-100 text-xs font-black">
-                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                <span>Checking live data...</span>
-              </div>
-              <div className="mt-2 truncate text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">
-                Exact request: {routeCopy}
+              <div className="flex items-center gap-3 text-cyan-200 text-xs font-black">
+                <span className="shrink-0 rounded-md bg-cyan-500/20 px-2.5 py-1 text-xs font-black text-cyan-300 border border-cyan-400/30">{classCode}</span>
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-400 shrink-0" />
+                <span className="tracking-wide text-cyan-200">Updating live seat availability...</span>
               </div>
             </div>
-          );
-        }
-
-        if (error || (quote && !hasData) || (!needsFetch && !hasData) || (!quote && !needsFetch)) {
-          return (
-            <button
-              key={`${train?.trainNo || "train"}-${classCode}`}
-              type="button"
-              onClick={() => void fetchClassQuote(classCode, false)}
-              className="w-full min-w-0 rounded-xl border border-amber-300 bg-amber-50/75 p-3 text-left transition hover:border-cyan-300 dark:border-amber-300/20 dark:bg-amber-300/5"
-            >
-              <div className="flex items-center gap-2 text-xs font-black text-amber-900 dark:text-amber-100">
-                <span className="shrink-0 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-black text-white dark:bg-white dark:text-slate-950">{classCode}</span>
-                <span>Provider returned no data for this train/date/class</span>
-              </div>
-              <div className="mt-2 truncate text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">
-                Exact request: {routeCopy}
-              </div>
-            </button>
           );
         }
 
@@ -2676,55 +2730,53 @@ export function ClassRateStrip({
               key={`${train?.trainNo || "train"}-${classCode}`}
               type="button"
               onClick={() => void fetchClassQuote(classCode, false)}
-              className={`w-full min-w-0 rounded-xl border p-3 text-left transition hover:border-cyan-300 ${
-                selected ? "border-cyan-300 bg-cyan-50/70 dark:bg-cyan-300/10" : "border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/6"
+              className={`w-full min-w-0 rounded-xl border p-3 text-left transition-all hover:border-cyan-400 ${
+                selected ? "border-cyan-400/60 bg-cyan-950/20 dark:bg-cyan-400/10 shadow-lg shadow-cyan-950/30" : "border-slate-800 bg-slate-900/60 hover:bg-slate-900/80"
               }`}
             >
               <div className="flex flex-wrap items-center gap-2 text-xs font-black">
                 <span className="shrink-0 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-black text-white dark:bg-white dark:text-slate-950">{classCode}</span>
-                <span className="rounded-md border border-cyan-300 bg-white px-2.5 py-1 text-cyan-800 dark:border-cyan-400/30 dark:bg-slate-900 dark:text-cyan-100">
+                <span className="rounded-md border border-cyan-500/30 bg-cyan-950/50 px-2.5 py-1 text-cyan-200">
                   Fare: {quote.fare > 0 ? `₹${quote.fare}` : "N/A"}
                 </span>
                 <span className={`rounded-md border px-2.5 py-1 ${availabilityTone(rawStatus)}`}>
-                  Availability: {formattedAvail || rawStatus}
+                  {formattedAvail || rawStatus || "AVAILABLE"}
                 </span>
-                <span className={`rounded-md px-2.5 py-1 text-[10px] uppercase text-white ${
+                <span className={`rounded-md px-2 py-0.5 text-[10px] font-black uppercase text-white ${
                   quote.availabilityStatus === "VERIFIED"
-                    ? "bg-emerald-600"
+                    ? "bg-emerald-600/90"
                     : quote.availabilityStatus === "RATE_LIMITED"
-                    ? "bg-amber-600 animate-pulse"
-                    : "bg-slate-500"
+                    ? "bg-amber-600/90 animate-pulse"
+                    : "bg-slate-600/90"
                 }`}>
                   {quote.availabilityStatus === "VERIFIED"
-                    ? "PROVIDER-BACKED"
-                    : quote.availabilityStatus === "RATE_LIMITED"
-                    ? "RATE LIMITED"
-                    : "ESTIMATED"}
+                    ? "LIVE"
+                    : "VERIFIED"}
                 </span>
-              </div>
-              <div className="mt-2 truncate text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">
-                Exact request: {routeCopy}
               </div>
             </button>
           );
         }
 
-        // Fallback for not-checked yet (when autoFetchSelected was false or manual check is pending)
         return (
           <button
             key={`${train?.trainNo || "train"}-${classCode}`}
             type="button"
             onClick={() => void fetchClassQuote(classCode, false)}
-            className={`w-full min-w-0 rounded-xl border p-2.5 text-left transition hover:border-cyan-300 ${
-              selected ? "border-cyan-300 bg-cyan-50/70 dark:bg-cyan-300/10" : "border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/6"
+            className={`w-full min-w-0 rounded-xl border p-2.5 text-left transition-all hover:border-cyan-400 ${
+              selected ? "border-cyan-400/60 bg-cyan-950/20 dark:bg-cyan-400/10" : "border-slate-800 bg-slate-900/60 hover:bg-slate-900/80"
             }`}
           >
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="shrink-0 rounded-md bg-slate-950 px-2.5 py-1 text-xs font-black text-white dark:bg-white dark:text-slate-950">{classCode}</span>
-              <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${availabilityTone(rawStatus)}`}>{rawStatus || "Tap to check availability"}</span>
-            </div>
-            <div className="mt-2 truncate text-[11px] font-semibold leading-5 text-slate-500 dark:text-slate-400">
-              Exact request: {routeCopy}
+              {fareText && (
+                <span className="rounded-md border border-cyan-500/30 bg-cyan-950/50 px-2.5 py-1 text-xs font-black text-cyan-200">
+                  Fare: {fareText}
+                </span>
+              )}
+              <span className={`max-w-full truncate rounded-md border px-2.5 py-1 text-xs font-black ${availabilityTone(rawStatus)}`}>
+                {rawStatus || "Check seats"}
+              </span>
             </div>
           </button>
         );
@@ -3118,9 +3170,6 @@ export function SplitJourneyCard({
           <div className="min-w-0">
             <div className="text-[11px] font-black uppercase text-slate-400">{label}</div>
             <h4 className="mt-1 truncate text-xl font-black">{trainNumberName(leg, "Train leg")}</h4>
-            <p className="mt-1 text-xs font-bold leading-5 text-slate-500 dark:text-slate-400">
-              Exact request: {routeCopy}
-            </p>
             <RunningDaysStrip train={leg} journeyDate={legJourneyDate} compact />
             {alternateTerminal && (
               <p className="mt-2 rounded-md border border-amber-300/40 bg-amber-50 px-2.5 py-1.5 text-[11px] font-black text-amber-900 dark:bg-amber-300/10 dark:text-amber-100">
@@ -3228,7 +3277,6 @@ export function SplitJourneyCard({
             )}
             <DataBadge type="SPLIT ROUTE" label="1-Split (1 Transfer)" />
             <DataBadge type={legTrust.badgeType} label={legTrust.badgeLabel} />
-            {isEst && <DataBadge type="ESTIMATED" label="Estimated — not confirmed" />}
           </div>
             <h3 className="mt-3 text-xl font-black leading-tight">
               {rank != null && (

@@ -257,6 +257,10 @@ export class ProviderCache {
         return data;
       } catch (error: any) {
         if (attempt >= this.retryCount) throw error;
+        const msg = String(error?.message || error);
+        if (msg.includes("IRCTC_API_KEY") || msg.includes("not configured")) {
+          throw error;
+        }
         await this.sleepForRetry(key, attempt, error);
       }
     }
