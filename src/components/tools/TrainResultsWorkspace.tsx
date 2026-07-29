@@ -161,7 +161,11 @@ export function TrainResultsWorkspace() {
       try {
         const stored = localStorage.getItem("railroute_recent_searches");
         if (stored) {
-          setRecentSearches(JSON.parse(stored));
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            const valid = parsed.filter((item: any) => item && typeof item === "object" && item.from && item.to && item.date);
+            setRecentSearches(valid);
+          }
         }
       } catch (e) {
         console.warn("Failed to load recent searches:", e);
@@ -1122,11 +1126,12 @@ export function TrainResultsWorkspace() {
           <div className="mt-4 animate-in fade-in zoom-in-95 duration-200">
             <div className="text-[10px] font-black uppercase text-slate-400">Recent Searches (Click to search)</div>
             <div className="mt-2 flex flex-wrap gap-2">
-              {recentSearches.map((item) => {
+              {recentSearches.filter((item) => item && item.from && item.to && item.date).map((item, idx) => {
                 const label = `${item.from} → ${item.to} (${item.date})`;
+                const uniqueKey = `recent-${item.from}-${item.to}-${item.date}-${item.class || 'any'}-${idx}`;
                 return (
                   <div
-                    key={`${item.from}-${item.to}-${item.date}-${item.class}`}
+                    key={uniqueKey}
                     className="group flex items-center gap-1.5 rounded-full border border-slate-200 bg-white pl-3.5 pr-2 py-1 text-xs font-bold text-slate-700 shadow-sm dark:border-white/10 dark:bg-[#101725] dark:text-slate-200"
                   >
                     <button
