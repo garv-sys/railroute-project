@@ -54,7 +54,7 @@ export function validateBookingDate(dateStr: string): DateValidationResult {
     };
   }
 
-  if (daysFromToday > 62) {
+  if (daysFromToday > 65) {
     return {
       valid: false,
       daysFromToday,

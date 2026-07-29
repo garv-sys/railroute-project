@@ -423,10 +423,10 @@ function SplitCompactRow({
   const leg1Class = resolvedClass || primaryClassCode(leg1) || "3A";
   const leg2Class = resolvedClass || primaryClassCode(leg2) || "3A";
 
-  // Auto live fetch only top 2 splits to avoid flooding network
-  const shouldAutoFetch = rank <= 2;
-  const { quote: q1 } = useLiveQuote(leg1, split.leg1Date || journeyDate, leg1Class, quota, shouldAutoFetch, rank * 400);
-  const { quote: q2 } = useLiveQuote(leg2, split.leg2Date || journeyDate, leg2Class, quota, shouldAutoFetch, rank * 400 + 200);
+  // Auto live fetch up to top 15 splits per request
+  const shouldAutoFetch = rank <= 15;
+  const { quote: q1 } = useLiveQuote(leg1, split.leg1Date || journeyDate, leg1Class, quota, shouldAutoFetch, Math.min(rank * 100, 1500));
+  const { quote: q2 } = useLiveQuote(leg2, split.leg2Date || journeyDate, leg2Class, quota, shouldAutoFetch, Math.min(rank * 100 + 50, 1500));
 
   const f1 = q1.fare > 0 ? q1.fare : fareToNumber(liveFareText(leg1)) || fareToNumber(split.leg1Fare);
   const f2 = q2.fare > 0 ? q2.fare : fareToNumber(liveFareText(leg2)) || fareToNumber(split.leg2Fare);

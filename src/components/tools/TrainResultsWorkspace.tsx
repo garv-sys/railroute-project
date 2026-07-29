@@ -2859,15 +2859,6 @@ function SplitResultsPanel({
 
   return (
     <div className="space-y-4">
-      {/* Progress indicator — only shown while fetching */}
-      {!allReady && (
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-white/10 dark:bg-white/6">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-          <span className="text-sm font-black text-slate-600 dark:text-slate-300">
-            Checking live seats &amp; fares — {readyCount} of {total} checked
-          </span>
-        </div>
-      )}
       {/* Render split cards */}
       {splits.slice(0, visibleLimit).map((split, index) => {
         const key = splitRouteStableKey(split) || `${split.hubStation}-${index}`;
@@ -2883,7 +2874,7 @@ function SplitResultsPanel({
               requestedClass={classType}
               quota={quota}
               autoFetchLive
-              fetchDelay={index * 1500}
+              fetchDelay={Math.min(index * 100, 1500)}
               onReady={handleReady}
             />
           </div>
