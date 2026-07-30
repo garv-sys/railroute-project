@@ -204,9 +204,9 @@ function getHubForSplit(split: any): HubId {
   return "NDLS";
 }
 
-function seatBadgeTone(raw: string): string {
-  const s = raw.toUpperCase();
-  if (!s || s === "—" || s.includes("CHECK") || s.includes("TAP")) {
+function seatBadgeTone(raw: any): string {
+  const s = typeof raw === "string" ? raw.toUpperCase() : String(raw || "").toUpperCase();
+  if (!s || s === "—" || s.includes("CHECK") || s.includes("TAP") || s.includes("OBJECT")) {
     return "border-slate-200 bg-slate-50 text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400";
   }
   if (s.includes("AVAILABLE") || s.includes("AVL") || s.includes("CNF") || s.includes("CURR")) {
@@ -255,37 +255,48 @@ function useLiveQuote(
   delayMs = 0
 ) {
   const [quote, setQuote] = useState<LiveQuote>({ fare: 0, availability: "", status: "idle" });
-  const fetchedRef = useRef(false);
-
-  const fetch = useCallback(async () => {
-    if (!train?.trainNo || !train?.source || !train?.destination || !journeyDate || !classCode) return;
-    setQuote({ fare: 0, availability: "", status: "loading" });
-    try {
-      const res = await postJson<any>("/api/availability", {
-        trainNo: train.trainNo,
-        source: train.source,
-        destination: train.destination,
-        date: journeyDate,
-        classType: classCode,
-        quota: quota || "GN",
-      });
-      const avail = res?.availability || res?.data?.availability || "";
-      const fare = fareToNumber(res?.fare ?? res?.data?.fare);
-      const isVerified = res?.availabilityStatus === "VERIFIED" || res?.data?.availabilityStatus === "VERIFIED";
-      setQuote({ fare, availability: avail, status: isVerified ? "verified" : "estimated" });
-    } catch {
-      setQuote({ fare: 0, availability: "Error", status: "error" });
-    }
-  }, [train?.trainNo, train?.source, train?.destination, journeyDate, classCode, quota]);
 
   useEffect(() => {
-    if (!autoFetch || fetchedRef.current) return;
-    fetchedRef.current = true;
-    const t = delayMs > 0 ? setTimeout(() => { fetch(); }, delayMs) : (fetch(), undefined);
-    return () => { if (t) clearTimeout(t); };
-  }, [autoFetch, delayMs, fetch]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    if (!autoFetch || !train?.trainNo || !train?.source || !train?.destination || !journeyDate || !classCode) return;
 
-  return { quote, refetch: fetch };
+    const doFetch = async () => {
+      if (cancelled) return;
+      setQuote({ fare: 0, availability: "", status: "loading" });
+      try {
+        const res = await postJson<any>("/api/availability", {
+          trainNo: train.trainNo,
+          source: train.source,
+          destination: train.destination,
+          date: journeyDate,
+          classType: classCode,
+          quota: quota || "GN",
+        });
+        if (cancelled) return;
+        const rawAvail = res?.availability || res?.data?.availability || "";
+        const avail = typeof rawAvail === "string" ? rawAvail : String(rawAvail || "");
+        const fare = fareToNumber(res?.fare ?? res?.data?.fare);
+        const isVerified = res?.availabilityStatus === "VERIFIED" || res?.data?.availabilityStatus === "VERIFIED";
+        setQuote({ fare, availability: avail, status: isVerified ? "verified" : "estimated" });
+      } catch {
+        if (!cancelled) setQuote({ fare: 0, availability: "Error", status: "error" });
+      }
+    };
+
+    if (delayMs > 0) {
+      timer = setTimeout(doFetch, delayMs);
+    } else {
+      doFetch();
+    }
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [autoFetch, train?.trainNo, train?.source, train?.destination, journeyDate, classCode, quota, delayMs]);
+
+  return { quote, refetch: () => {} };
 }
 
 // ─── Live train card ──────────────────────────────────────────────────────────
