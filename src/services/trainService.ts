@@ -3250,6 +3250,17 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
             if (layoverHrs < minLayoverHrs || layoverHrs > 24) {
               continue;
             }
+
+            // Exclude mismatched Sleeper (SL) + Chair Car (CC/EC) combinations
+            const classes1 = (Array.isArray(t1.classes) ? t1.classes : [t1.classType || t1.classCode || ""]).map((c: any) => String(c).toUpperCase().trim());
+            const classes2 = (Array.isArray(t2.classes) ? t2.classes : [t2.classType || t2.classCode || ""]).map((c: any) => String(c).toUpperCase().trim());
+            const isPureSL1 = classes1.includes("SL") && !classes1.some((c: string) => ["3A", "2A", "1A", "3E"].includes(c));
+            const isPureCC2 = classes2.some((c: string) => ["CC", "EC"].includes(c)) && !classes2.some((c: string) => ["3A", "2A", "1A", "3E"].includes(c));
+            const isPureCC1 = classes1.some((c: string) => ["CC", "EC"].includes(c)) && !classes1.some((c: string) => ["3A", "2A", "1A", "3E"].includes(c));
+            const isPureSL2 = classes2.includes("SL") && !classes2.some((c: string) => ["3A", "2A", "1A", "3E"].includes(c));
+            if ((isPureSL1 && isPureCC2) || (isPureCC1 && isPureSL2)) {
+              continue;
+            }
           }
 
           const key = `${tn1}_${hub}_${tn2}`;

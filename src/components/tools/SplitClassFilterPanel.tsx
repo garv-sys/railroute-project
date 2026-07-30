@@ -31,10 +31,10 @@ const CLASS_OPTIONS = [
 
 const PRESETS = [
   { label: "Any Class", leg1: [], leg2: [] },
-  { label: "AC Sleeper (Leg 1) + CC (Leg 2)", leg1: ["3A", "2A", "1A"], leg2: ["CC", "EC"] },
   { label: "All AC (Both Legs)", leg1: ["3A", "2A", "1A", "CC", "EC"], leg2: ["3A", "2A", "1A", "CC", "EC"] },
-  { label: "Economy (Both Legs)", leg1: ["SL", "2S"], leg2: ["SL", "2S"] },
-  { label: "Premium (2A/1A/EC)", leg1: ["2A", "1A"], leg2: ["2A", "1A", "EC"] },
+  { label: "Sleeper Class (Both Legs)", leg1: ["SL", "3A", "2A"], leg2: ["SL", "3A", "2A"] },
+  { label: "Chair Car (Both Legs)", leg1: ["CC", "EC", "2S"], leg2: ["CC", "EC", "2S"] },
+  { label: "Premium AC (1A / 2A)", leg1: ["2A", "1A"], leg2: ["2A", "1A"] },
 ];
 
 export function SplitClassFilterPanel({

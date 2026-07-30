@@ -224,9 +224,23 @@ function seatBadgeTone(raw: any): string {
   return "border-slate-200 bg-slate-50 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300";
 }
 
-function formatSeat(raw: string): string {
-  const s = String(raw || "").trim().toUpperCase();
-  if (!s || s.includes("CHECK") || s.includes("TAP") || s.includes("NOT_CHECKED")) return "—";
+function cleanSeatString(raw: any): string {
+  if (!raw) return "";
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "object") {
+    if (typeof raw.availability === "string") return raw.availability;
+    if (typeof raw.status === "string") return raw.status;
+    if (typeof raw.current === "string") return raw.current;
+    if (typeof raw.text === "string") return raw.text;
+    return "";
+  }
+  return String(raw || "");
+}
+
+function formatSeat(raw: any): string {
+  const str = cleanSeatString(raw);
+  const s = str.trim().toUpperCase();
+  if (!s || s.includes("OBJECT") || s.includes("CHECK") || s.includes("TAP") || s.includes("NOT_CHECKED")) return "—";
   if (s.includes("AVAILABLE") || s.includes("AVL") || s.includes("CURR_AV")) {
     const n = s.match(/\d+/)?.[0];
     return n ? `AVAIL ${n}` : "AVAILABLE";
@@ -624,24 +638,6 @@ function HubDetailView({
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="rounded-xl border border-white/20 bg-white/15 px-3 py-2 text-center">
-              <div className="text-[10px] font-black uppercase text-white/70">Splits</div>
-              <div className="mt-0.5 text-xl font-black">{topSplits.length}</div>
-            </div>
-            {availSplits > 0 && (
-              <div className="rounded-xl border border-emerald-400/40 bg-emerald-400/20 px-3 py-2 text-center">
-                <div className="text-[10px] font-black uppercase text-emerald-100">Available</div>
-                <div className="mt-0.5 text-xl font-black">{availSplits}</div>
-              </div>
-            )}
-            {(leg1Trains.length > 0 || leg2Trains.length > 0) && (
-              <div className="rounded-xl border border-white/20 bg-white/15 px-3 py-2 text-center">
-                <div className="text-[10px] font-black uppercase text-white/70">Leg trains</div>
-                <div className="mt-0.5 text-xl font-black">{leg1Trains.length + leg2Trains.length}</div>
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
@@ -696,9 +692,6 @@ function HubDetailView({
                 <span className="text-sm font-black text-slate-700 dark:text-slate-200">
                   Leg 1: {source} → {hub.city}
                 </span>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${colors.pill}`}>
-                  {leg1Trains.length} trains
-                </span>
               </div>
               {leg1Trains.length === 0 ? (
                 <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-4 text-center text-xs font-bold text-slate-400 dark:border-white/8 dark:bg-white/3">
@@ -732,9 +725,6 @@ function HubDetailView({
                 <div className={`h-2 w-2 rounded-full ${colors.dot}`} />
                 <span className="text-sm font-black text-slate-700 dark:text-slate-200">
                   Leg 2: {hub.city} → {destination}
-                </span>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${colors.pill}`}>
-                  {leg2Trains.length} trains
                 </span>
               </div>
               {leg2Trains.length === 0 ? (
