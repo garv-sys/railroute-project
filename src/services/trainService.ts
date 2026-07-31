@@ -3417,7 +3417,7 @@ export async function findSmartRoutesForDate(source: string, dest: string, date:
       console.log(`[TRACER] [findSmartRoutesForDate] Validation: Rejected route "${routeString}" - enrichment exception:`, e);
     }
   }
-  const diverseResults = selectDiverseHubRoutes(results, 50, directTrainNos);
+  const diverseResults = selectDiverseHubRoutes(results, 15, directTrainNos);
   console.log(`[TRACER] [findSmartRoutesForDate] 5. Enrichment Finished: successfully enriched count=${diverseResults.length}`);
   return diverseResults;
 }

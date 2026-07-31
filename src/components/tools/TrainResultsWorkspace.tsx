@@ -213,6 +213,15 @@ export function TrainResultsWorkspace() {
       if (duration && duration > durationLimit) return false;
       return true;
     });
+    function popularTrainPriorityScore(train: any): number {
+      const no = String(train?.trainNo || train?.train_no || "").trim();
+      const name = String(train?.trainName || train?.train_name || "").toUpperCase();
+      if (no === "15631" || no === "15632" || name.includes("BKN") || name.includes("GUWAHATI BIKANER")) return 100;
+      if (no === "12395" || no === "12396" || name.includes("ZIYARAT")) return 90;
+      if (name.includes("RAJDHANI") || name.includes("SAMPOORNA KRANTI") || name.includes("TEJAS")) return 80;
+      return 0;
+    }
+
     return [...next].sort((a, b) => {
       const fareA = selectedSortClass ? classFareAmount(a, selectedSortClass) : trainFareAmount(a);
       const fareB = selectedSortClass ? classFareAmount(b, selectedSortClass) : trainFareAmount(b);
@@ -224,6 +233,11 @@ export function TrainResultsWorkspace() {
       if (sortBy === "lowestLayover") return durationA - durationB;
       if (sortBy === "earliest") return timeToMinutes(a.departureTime) - timeToMinutes(b.departureTime);
       if (sortBy === "latest") return timeToMinutes(b.departureTime) - timeToMinutes(a.departureTime);
+
+      const popA = popularTrainPriorityScore(a);
+      const popB = popularTrainPriorityScore(b);
+      if (popB !== popA) return popB - popA;
+
       if (sortBy === "availability") {
         const availabilityScore = (train: any) => {
           const availability = selectedSortClass ? classAvailabilityText(train, selectedSortClass) : train.availability;
@@ -242,14 +256,14 @@ export function TrainResultsWorkspace() {
     const fareLimit = Number(maxFare) || Infinity;
     const durationLimit = maxDuration ? Number(maxDuration) * 60 : Infinity;
     return dedupeSplitRoutes(state.splits).filter((split) => {
-      // 2. "Not bookable on this date" for selected class on either leg -> remove entire split card
+      // 2. Only filter out if leg is explicitly cancelled or not running on date
       const isNotBookableLeg = (leg: any) => {
         const code = resolveClassCode(leg, selectedSortClass || "");
         const first = code ? leg?.classAvailability?.[code]?.[0] : undefined;
         const avail = String(first?.text || first?.availabilityText || leg?.availability || "").toLowerCase();
         const reason = String(first?.lookupReason || leg?.lookupReason || "").toLowerCase();
         const combined = avail + " " + reason;
-        return /not bookable|not available for booking|train not on scheduled date|cancelled/i.test(combined);
+        return /train not on scheduled date|cancelled|train cancelled/i.test(combined);
       };
       if (isNotBookableLeg(split.leg1) || isNotBookableLeg(split.leg2)) {
         return false;
@@ -2038,9 +2052,9 @@ export function PremiumTrainCard({
           )}
 
           <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-3xl bg-slate-50 p-4 dark:bg-black/20">
-            <div><div className="text-3xl font-black">{train.departureTime || "--:--"}</div><div className="mt-1 text-xs font-black text-emerald-600 dark:text-emerald-200">{fullStationLabelFromCode(actualSource || train.source)}</div></div>
+            <div><div className="text-3xl font-black">{train.departureTime || "--:--"}</div><div className="mt-1 text-xs font-black text-emerald-600 dark:text-emerald-200">{stationCompactLabelWithDistance(actualSource || train.source, requestedSource)}</div></div>
             <div className="min-w-28 text-center"><div className="text-xs font-black text-slate-500">{train.duration || "N/A"}</div><div className="my-2 h-px bg-gradient-to-r from-emerald-400 via-cyan-400 to-rose-400" /><div className="text-[11px] font-bold text-slate-400">route</div></div>
-            <div className="text-right"><div className="text-3xl font-black">{train.arrivalTime || "--:--"}</div><div className="mt-1 text-xs font-black text-rose-600 dark:text-rose-200">{fullStationLabelFromCode(actualDestination || train.destination)}</div></div>
+            <div className="text-right"><div className="text-3xl font-black">{train.arrivalTime || "--:--"}</div><div className="mt-1 text-xs font-black text-rose-600 dark:text-rose-200">{stationCompactLabelWithDistance(actualDestination || train.destination, requestedDestination)}</div></div>
           </div>
           {renderAvailabilityRow(train, searchSelectedClass, refreshingKey, quota, requestExactLive)}
 
