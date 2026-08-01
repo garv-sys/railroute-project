@@ -213,15 +213,6 @@ export function TrainResultsWorkspace() {
       if (duration && duration > durationLimit) return false;
       return true;
     });
-    function popularTrainPriorityScore(train: any): number {
-      const no = String(train?.trainNo || train?.train_no || "").trim();
-      const name = String(train?.trainName || train?.train_name || "").toUpperCase();
-      if (no === "15631" || no === "15632" || name.includes("BKN") || name.includes("GUWAHATI BIKANER")) return 100;
-      if (no === "12395" || no === "12396" || name.includes("ZIYARAT")) return 90;
-      if (name.includes("RAJDHANI") || name.includes("SAMPOORNA KRANTI") || name.includes("TEJAS")) return 80;
-      return 0;
-    }
-
     return [...next].sort((a, b) => {
       const fareA = selectedSortClass ? classFareAmount(a, selectedSortClass) : trainFareAmount(a);
       const fareB = selectedSortClass ? classFareAmount(b, selectedSortClass) : trainFareAmount(b);
@@ -233,10 +224,6 @@ export function TrainResultsWorkspace() {
       if (sortBy === "lowestLayover") return durationA - durationB;
       if (sortBy === "earliest") return timeToMinutes(a.departureTime) - timeToMinutes(b.departureTime);
       if (sortBy === "latest") return timeToMinutes(b.departureTime) - timeToMinutes(a.departureTime);
-
-      const popA = popularTrainPriorityScore(a);
-      const popB = popularTrainPriorityScore(b);
-      if (popB !== popA) return popB - popA;
 
       if (sortBy === "availability") {
         const availabilityScore = (train: any) => {
