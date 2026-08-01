@@ -1230,7 +1230,7 @@ export function TrainResultsWorkspace() {
 	          </div>
 	        </div>
 	      )}
-	      {hasSearched && !state.loading && !state.splitLoading && bookableDirectCount < 3 && source && destination && (
+	      {hasSearched && source && destination && (
 	        <NearbyDateSuggestions
 	          source={source}
 	          destination={destination}

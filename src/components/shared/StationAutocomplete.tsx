@@ -328,103 +328,53 @@ export function NearbyDateSuggestions({
   directCount: number;
   onSelectDate: (date: string) => void;
 }) {
-  const [nearby, setNearby] = useState<{ loading: boolean; items: Array<{ date: string; count: number; error?: string }> }>({
-    loading: false,
-    items: [],
-  });
+  const today = todayIso();
+  const maxDate = maxBookableDateIso();
 
-  useEffect(() => {
-    if (!source || !destination || !date || directCount >= 3) {
-      setNearby({ loading: false, items: [] });
-      return;
+  const windowDates = useMemo(() => {
+    const list: string[] = [];
+    let curr = today;
+    while (curr <= maxDate && list.length < 60) {
+      list.push(curr);
+      curr = addIsoDays(curr, 1);
     }
-
-    let active = true;
-    const today = todayIso();
-    const nearbyDates = Array.from({ length: 7 }, (_, index) => addIsoDays(date, index - 3)).filter((item) => item >= today && item <= maxBookableDateIso());
-    setNearby((current) => ({ loading: true, items: current.items.filter((item) => nearbyDates.includes(item.date)) }));
-
-    Promise.all(
-      nearbyDates.map(async (nearbyDate) => {
-        try {
-          const response = await postJson<any>("/api/train-between", {
-            source,
-            destination,
-            date: nearbyDate,
-            classType,
-            quota,
-            debug: false,
-          });
-          const trains = response?.trains || response?.data?.trains || [];
-          return { date: nearbyDate, count: Array.isArray(trains) ? trains.length : 0 };
-        } catch (error) {
-          return { date: nearbyDate, count: 0, error: error instanceof Error ? error.message : "Could not fetch count" };
-        }
-      })
-    ).then((items) => {
-      if (!active) return;
-      setNearby({ loading: false, items });
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [classType, date, destination, directCount, quota, source]);
-
-  if (directCount >= 3 || (!nearby.loading && nearby.items.length === 0)) return null;
-
-  const maxCount = Math.max(1, ...nearby.items.map((item) => item.count));
-  const recommended = nearby.items
-    .filter((item) => item.date !== date)
-    .sort((a, b) => b.count - a.count)[0];
+    return list;
+  }, [today, maxDate]);
 
   return (
     <div className={softPanel("mt-4 rounded-[28px] p-4")}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div>
-	          <div className="text-[11px] font-black uppercase text-cyan-700 dark:text-cyan-200">Nearby date options</div>
-	          <h3 className="mt-1 text-lg font-black">
-	            Only {directCount} live direct option{directCount === 1 ? "" : "s"} on {shortDateLabel(date)}. Nearby schedule counts:
-	          </h3>
-	        </div>
-        {nearby.loading ? (
-          <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-black text-slate-500 dark:border-white/10 dark:bg-white/8 dark:text-slate-300">
-            Checking dates...
-          </span>
-	        ) : recommended && recommended.count > directCount ? (
-	          <span className="rounded-md border border-emerald-300/35 bg-emerald-50 px-3 py-2 text-[11px] font-black text-emerald-800 dark:bg-emerald-300/10 dark:text-emerald-100">
-	            Recommended: {shortDateLabel(recommended.date)} · {recommended.count} schedule trains
-	          </span>
-	        ) : null}
+          <div className="text-[11px] font-black uppercase text-cyan-700 dark:text-cyan-200">
+            60-Day Reservation Window (IRCTC)
+          </div>
+          <h3 className="mt-0.5 text-sm font-black text-slate-800 dark:text-white">
+            Click any travel date from today up to {shortDateLabel(maxDate)}:
+          </h3>
+        </div>
       </div>
-      <div className="mt-4 grid gap-2 md:grid-cols-7">
-        {(nearby.items.length ? nearby.items : Array.from({ length: 7 }, (_, index) => ({ date: addIsoDays(date, index - 3), count: 0 }))).map((item) => {
-          const selected = item.date === date;
-          const width = `${Math.max(item.count > 0 ? 14 : 4, Math.round((item.count / maxCount) * 100))}%`;
-          const isRecommended = recommended?.date === item.date && item.count > directCount;
+
+      <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
+        {windowDates.map((dateStr) => {
+          const isSelected = dateStr === date;
+          const labelParts = prettyDateLabel(dateStr).split(" ");
           return (
             <button
-              key={item.date}
+              key={dateStr}
               type="button"
-              onClick={() => onSelectDate(item.date)}
-              className={`rounded-2xl border p-3 text-left transition ${
-                selected
-                  ? "border-cyan-400 bg-cyan-50 text-cyan-950 dark:bg-cyan-300/10 dark:text-cyan-50"
-                  : isRecommended
-                    ? "border-emerald-300 bg-emerald-50 text-emerald-950 hover:border-emerald-400 dark:bg-emerald-300/10 dark:text-emerald-50"
-                    : "border-slate-200 bg-slate-50 text-slate-700 hover:border-cyan-300 dark:border-white/10 dark:bg-white/6 dark:text-slate-200"
+              onClick={() => onSelectDate(dateStr)}
+              className={`flex shrink-0 flex-col items-center justify-center rounded-xl border px-3.5 py-2 text-center transition-all ${
+                isSelected
+                  ? "border-cyan-500 bg-cyan-600 text-white shadow-md shadow-cyan-500/20 font-black scale-105"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-cyan-300 hover:bg-cyan-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
               }`}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-black">{shortDateLabel(item.date)}</span>
-                {selected && <span className="text-[10px] font-black uppercase">Selected</span>}
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
-                <div className={`h-full rounded-full ${item.count >= 6 ? "bg-emerald-500" : item.count >= 3 ? "bg-cyan-500" : "bg-amber-500"}`} style={{ width }} />
-              </div>
-	              <div className="mt-2 text-xs font-black">
-	                {nearby.loading ? "Checking..." : `${item.count} schedule train${item.count === 1 ? "" : "s"}`}
-	              </div>
+              <span className="text-[10px] font-black uppercase opacity-80">
+                {labelParts[0] || ""}
+              </span>
+              <span className="text-xs font-black">
+                {labelParts.slice(1).join(" ") || dateStr}
+              </span>
             </button>
           );
         })}
